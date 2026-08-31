@@ -1,151 +1,162 @@
 # Documentation issues
 
-This file tracks places where the prose disagrees with itself, overstates what
-we know, or makes a simple point much harder to read than it needs to be.
+This file tracks contradictions, stale claims and documentation that still needs
+cleanup. It is intentionally a human-maintained list; generated ledgers stay
+generated.
 
-`STATUS.md` is still the current support list. This file is the cleanup queue.
+## Resolved on this branch
 
-## Contradictions / needs one answer
+### Non-L48 strict builds
 
-### Non-L48 builds
+The old prose disagreed about whether non-L48 devices could emit strict images.
+The implementation in `agamemnon/engine/claim_policy.py` answers this clearly:
 
-`AG32_OVERVIEW.md` says pad-free configuration-accept builds are supported for
-all four package targets, while `ARCHITECTURE.md` says strict image emission
-refuses every non-L48 target.
+- pad-free/fabric-logic-only builds are allowed on Q32/L64/L100;
+- physical/electrical surfaces are restricted to L48 in strict mode;
+- `research-unsafe` has its separate rules.
 
-These cannot both describe the current CLI. Check the code and make both pages
-say the same thing. Keep separate answers for:
+`ARCHITECTURE.md` and `AG32_OVERVIEW.md` now say this. The generated
+`FAMILY_COVERAGE_MATRIX.md` was already consistent with the implementation.
 
-- generating a device database;
-- routing a pad-free design;
-- emitting an image;
-- routing package pins;
-- hardware qualification.
+**Still stale:** `USAGE.md` contains an older sentence saying strict image
+emission rejects all non-L48 packages. That paragraph should be corrected when
+`USAGE.md` gets its larger cleanup.
 
-### UART mask-ROM / Pico recovery status
+### Absolute “never emits a bad bitstream” promise
 
-`PROGRAMMING.md` calls the UART mask-ROM/Pico path recovery-capable, but later
-says the target-side five-wire setup has not completed hardware qualification.
-The README also calls it the flash-independent recovery route.
+The old README claimed AGaMEMnon would never emit a bitstream that failed on
+real silicon. The hardware campaign contains 13 counterexamples.
 
-The likely distinction is simple: the ROM protocol exists and is independent
-of main flash, while the current Pico-to-L48 bench setup still needs its final
-target-side run. Say that directly everywhere and avoid using "qualified" for
-two different layers of the stack.
+Removed. The docs now say the useful thing: known failures are blocked where
+possible, but new configurations can still be wrong.
 
-### "AGaMEMnon will never emit a bad bitstream"
+### Fork quick-start URLs
 
-The old README said:
+Several fork docs cloned `bbenchoff/AGaMEMnon`. The reader-facing README,
+installation and contributing instructions now clone
+`codeandsolder/AGaMEMnon`.
 
-> The output of this project will never emit a bitstream that will fail on real silicon.
+### UART ROM / Pico wording
 
-`STATUS.md` records 13 clean AGaMEMnon images that failed their hardware tests.
-Known bad images/compositions are now blocked, but that is not the same as a
-guarantee for arbitrary new designs.
+The docs now distinguish the two facts:
 
-Fixed in the documentation cleanup branch by removing the absolute claim.
+- the chip has a flash-independent UART mask-ROM recovery mechanism;
+- the current Pico-to-L48 five-wire target setup still needs its final hardware
+  run.
 
-## Misleading or stronger than the evidence shown
+Avoid shortening both into “UART recovery qualified.”
 
-### `af.exe` "has no conduction model"
+### Clock-profile count
 
-Several pages state as fact that `af.exe` is conduction-blind or has no model of
-which wires conduct. The observed fact is that the vendor backend can produce
-routes/designs that fail on hardware, and the reverse engineering has found
-cases where its intended topology is not enough to predict working silicon.
+The overview now uses one consistent statement: 45 accepted fabric
+`(SYSCLK,HSE)` pairs, 43 measured on the reference board with HSE=8, plus two
+byte-exact 12/16 MHz HSE profiles not run on that board.
 
-If the binary analysis actually proves there is no conduction model, point to
-that evidence. Otherwise phrase this as observed behavior rather than an
-implementation fact about a closed binary.
+## Claims that still need checking
 
-### "Electrically dead edges"
+### `af.exe` and “no conduction model”
 
-Older prose talks about dead routing edges. The newer conduction work says all
-14 entries in the former negative catalogue conduct in isolated witnesses and
-that the original failures were composition/congestion dependent. Old pages
-should stop using those 14 as examples of intrinsically dead wires.
+Old prose stated as implementation fact that `af.exe` has no conduction model.
+The observed fact is weaker and sufficient: vendor-generated routes can fail on
+hardware and the vendor output does not reliably predict every physical
+composition.
 
-### Fork README clones upstream
+The README and reverse-engineering narrative now use observed behavior instead.
+Search older research logs before treating every remaining “conduction-blind”
+phrase as established binary-analysis fact. If decompilation really proves the
+stronger statement, link that evidence where the claim is made.
 
-The fork's quick-start command currently clones `bbenchoff/AGaMEMnon` instead of
-`codeandsolder/AGaMEMnon`. If the fork is meant to be directly usable, the
-command should point at the fork. If this is intentionally an upstream-only
-README, say why.
+### Old “dead edge” terminology
 
-### Clock-profile counts are hard to reconcile
+All 14 entries in the old per-edge negative catalogue later conducted in
+isolated tests. Historical logs can keep the old terminology when describing
+what was believed at the time, but current summaries should call those failures
+composition/congestion-context failures rather than intrinsically dead wires.
 
-`AG32_OVERVIEW.md` describes 45 accepted `(SYSCLK,HSE)` pairs as seven
-byte-exact vendor-oracle profiles plus 38 additional HSE=8 measurements.
-`STATUS.md` describes 43 measured HSE=8 rates plus two byte-exact profiles that
-need unavailable 12/16 MHz HSEs.
+`CONDUCTION_REFRAME_STATUS.md` is deliberately a chronological record, so do
+not rewrite old entries to pretend the project knew the answer earlier.
 
-Those may be the same 45 points with different grouping, but a reader should
-not have to reverse-engineer the arithmetic. Use one table or one shared source
-for the count.
+### MCU clock terminology
 
-## Prose cleanup queue
+`MCU_CLOCKS.md` contains several generations of clock conclusions and is useful
+as an investigation record, but it is hard to tell at a glance which numbers
+are current. In particular:
 
-These are not necessarily wrong; they are just written like internal policy or
-qualification paperwork instead of documentation for someone trying to use or
-understand the project.
+- MTIME measured 14.08 MHz in one SRAM-loaded setup;
+- UART0's measured reference was around 14.47 MHz;
+- SPI0's absolute reference remains unresolved;
+- the external-AHB bus clock has a measured 1:1 ratio to MTIME, not a settled
+  absolute frequency.
 
-### `STATUS.md`
+A short “current answer” table at the top would make the long historical detail
+much easier to use.
 
-The support matrix is useful, but the introduction and release-health section
-repeat the same warning in several forms: a passing build is not proof, exact
-results do not generalize, known failures are blocked, and root causes are
-still open. Say each once. Keep the defect table and the actual numbers.
+## Remaining prose cleanup
 
-Phrases worth removing or translating include:
+### `USAGE.md`
 
-- "authoritative public support boundary";
-- "silicon-qualified exact subset" when "tested on this exact setup" works;
-- "correctness escape" outside the defect table;
-- "containment is the release-safety gate and is met";
-- repeated "does not qualify ..." tails on every paragraph when the table can
-  simply list what works and what does not.
+This is now one of the largest reader-facing holdouts. It mixes command
+reference, hardware campaign results, checkpoint archaeology and repeated
+support caveats.
 
-### `VENDOR_PARITY.md`
+Suggested split:
 
-The campaign results are interesting. The repeated discussion of population
-claims, exact claim syntax, evidence layers, and what a reader is allowed to
-infer makes the page feel adversarial.
+- keep common CLI syntax/options in `USAGE.md`;
+- move exact retained checkpoint recipes to a dedicated replay/qualification
+  reference;
+- keep hardware evidence in `STATUS.md` / hardware pages;
+- fix the stale non-L48 package statement noted above.
 
-Keep the 105-design result table, what was tested, surprising vendor failures,
-and the failure families. One plain sentence saying the sample was hand-written
-and had no holdout set is enough.
+The opening `IMPORTANT` box is also redundant with the status page.
 
-### `AG32_OVERVIEW.md`
+### `MCU_CLOCKS.md`
 
-The overview should be the friendly entry point. Its opening currently starts
-with qualification-policy language before explaining why the chip is
-interesting. Replace that with a short state-of-the-project paragraph and link
-to `STATUS.md` for details.
+Keep the measurements and history, but add a short current-state table first and
+move retracted/obsolete interpretations under a historical section.
 
-The long External-AHB paragraph also compresses too many unrelated results into
-one block. Summarize the working examples and link the detailed AHB page.
+### `FABRIC_DEFAULT_CANVAS.md`
 
-### `ROUTING_ADMISSION.md`
+This is valuable reverse-engineering archaeology, but the top has several
+TL;DRs and repeated “what this does not prove” paragraphs. A cleaner structure
+would be:
 
-The two useful questions are:
+1. what `fabric_default.bin` is today;
+2. file/layout facts;
+3. what is decoded;
+4. what is still unknown;
+5. historical corrections.
 
-1. is there evidence that the route physically works?
-2. do we know the mux codeword?
+Do not delete the measurement tables; they are the useful part.
 
-Everything after that should explain the three routing tiers and the measured
-coverage. The current opening adds a third whole-design disclaimer, then later
-repeats it in several forms. The "loud, local, and diagnosable" description of
-conduction failures is also too absolute given the later composition-level
-failures.
+### `CONDUCTION_REFRAME_STATUS.md`
 
-### `ROADMAP.md`
+Keep this mostly as a lab log. It records wrong turns and reversals that should
+not be sanitized away. The main improvement would be a short front-page index:
+current conclusion, important reversals, then the chronological log.
 
-A roadmap can say what is broken and what to do next without restating the
-release process in every priority. Keep the defect-specific experiments and
-engineering tasks; shorten procedural phrases such as "required closure",
-"release boundary reproducible and fail-closed", and the long promotion rule.
+### `HARDWARE_VALIDATION.md`
+
+Likewise, prefer a concise index/current summary at the top rather than deleting
+the detailed bench records. The raw negative results are useful and should stay.
 
 ### `CLAIM_POLICY_LEDGER.md`
 
-This file is generated. Do not hand-edit it into friendly prose. Treat it as a
-machine-readable/generated reference and keep human documentation elsewhere.
+Generated file. Do not edit it for style. Human-readable explanations belong in
+`ENGINE_CONFIGURATION.md` and `STATUS.md`.
+
+### `FAMILY_COVERAGE_MATRIX.md`
+
+Also generated. Its prose is still fairly bureaucratic, but the fix belongs in
+`tools/generate_family_coverage_matrix.py` / its source JSON rather than a hand
+edit to the generated Markdown.
+
+## Style rule going forward
+
+For reader-facing docs, prefer:
+
+- **works** — with the useful scope when needed;
+- **broken** — with the defect or observed behavior;
+- **unknown/untested** — when we genuinely do not know.
+
+Use evidence-tier/policy vocabulary when it explains an actual tool behavior,
+not as a ritual disclaimer around every engineering statement.
