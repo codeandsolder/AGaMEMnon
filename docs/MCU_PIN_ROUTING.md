@@ -1,79 +1,117 @@
-# MCU alternate-function and fabric-routing policy
+# MCU peripheral and pin routing
 
-The AG32 does not have a conventional fixed alternate-function matrix that
-firmware can select by writing one pin-mux number. Most hard peripheral signals
-pass through the programmable fabric before they reach package pins.
+The AG32 does not have a normal STM32-style alternate-function matrix where
+firmware picks “UART on pin 12” from a mux register. Most hard-peripheral
+signals still pass through the FPGA fabric before they reach package pins.
 
-The published GPIO `AFSEL` bit has one documented job:
+`GPIOAFSEL` only chooses who controls a GPIO line:
 
-- `0` gives software control to the GPIO `DATA` and `DIR` registers;
-- `1` gives hardware control of that GPIO line to the surrounding system.
+- `0`: software GPIO (`DATA` / `DIR`);
+- `1`: hardware/peripheral control.
 
-It does not identify UART, SPI, I2C, CAN, or another source, and it does not
-prove that the selected signal reaches a package pin. That second mapping is a
-property of the loaded fabric image and the package bond map.
+It does **not** select UART/SPI/I²C/CAN, and it does not determine which package
+pin a peripheral reaches. That part comes from the loaded fabric image.
 
-The same rule applies within one pin direction. An exact passing route does not
-qualify a newly composed route to that pad. In the 2026-08-24 campaign, new
-model-correct PIN_10 and PIN_12 held-input compositions returned only low, and
-new SPI0/SPI1 MISO compositions returned `0xffffffff`, while their vendor
-controls passed. Those paths remain `VP-AGM-008`; typed SPI MISO is fail-closed.
-The earlier exact input and SPI0 receive rows below describe only their retained
-images. Conversely, campaign UART0/1/2 TX, SPI0/1 TX, and I²C0/1 routes add
-positive exact points without creating a general alternate-function matrix.
+This means a peripheral driver and a pin route are separate things: firmware can
+configure UART0 correctly while the fabric routes UART0 nowhere useful.
 
-## Current evidence
+## Current L48 routes
 
-| Route | State | Boundary |
-|---|---|---|
-| `GPIO4.1 -> PIN_34 -> LED1` | Silicon-qualified | Observed with the vendor-default and qualified USB fabric on the L48 reference board |
-| `GPIO4[1:4] -> PIN_34..PIN_31 -> LED1..LED4` | Vendor-board mapping | Used by the factory fabric; only LED1 has the independent minimal-fabric silicon record |
-| MCU GPIO4 to/from AGRV2K fabric | Silicon-qualified subset | Four-bit inverted loopback covered every input combination; this qualifies the exercised bridge routes, not arbitrary GPIO bits |
-| MCU GPIO5 data/OE/input boundary unit | Silicon-qualified exact L48 subset | Pure-open output-data/OE lanes 0 and 1 return through input lane 2. The emitter selects terminal 8 on the seven inactive `BBMUXS` groups; zero-filled inactive terminals fail. No other GPIO5 lane or package pin is claimed |
-| Fabric outputs `PIN_25..PIN_28` | Silicon-qualified | Exact L48 package and qualification harness only. All four reproduce from the ordinary CLI (`agamemnon build qualification/left_edge_outputs.v --pcf qualification/left_edge_outputs_L48.pcf --research-unsafe`, image sha256 `a63ab5bc26bb4852555fb93863f065ba020564ec77e801cd4d67d4bcf865aba3`, 35 pips / 0 unmapped / 0 predicted / 0 legacy-abs, Pico GP12 404,383 Hz, GP13 405,612 Hz, GP16 405,168 Hz, GP17 411,144 Hz, undriven GP8/`PIN_18` 0 Hz as the negative control, FCB `0x000f0002`). That recipe is the Python-architecture PCF placer, which composes experimental options and needs `--research-unsafe`. `agamemnon build qualification/left_edge_outputs.v --uarch --pcf qualification/left_edge_outputs_L48.pcf` (no `--research-unsafe`) also builds a release-strict, zero-unmapped/predicted/legacy-selector image that FCB-configures the real device to `0x000f0002` over a non-destructive SRAM session; a Pico toggle re-witness of that image is closed, all four pads toggling under both pulls on exactly their intended lead (`io_evidence.jsonl` trial `pad-uarch-pcf-toggle-rewitness-20260817`) |
-| Fabric outputs `PIN_10` through `PIN_19` | Silicon-qualified | All ten decimal physical top-edge L48 package leads are qualified through the ordinary `agamemnon build <source> --pcf <constraints>` flow. The closing PIN_10/PIN_11 matrix toggles each alone and both simultaneously under opposite Pico pulls, with every other observed lead static; the retained production pair repacks byte-identically. Their config tile carried stale selectors, so this also validates that active IOMUX fields are replaced rather than ORed. `PIN_n` is a decimal package-lead label, not hexadecimal indexing. The claim is exact per-pad output compositions on L48, not arbitrary alternate routes, other packages, bidirectionality, or electrical modes. Nine of these ten (all but PIN_15) also build release-strict with `--uarch --pcf` and no `--research-unsafe` (`AGAMEMNON_VENDOR_OUT_SLICE` is now release-admitted for exactly the four qualified presentations, value-gated so nothing else is), and every one FCB-configured the real device to `0x000f0002` (`io_evidence.jsonl` trial `pad-uarch-pcf-release-strict-vehicle-config-accept-20260817`); PIN_15 as an output still fails to route under `--uarch` and still needs `--research-unsafe`; the Pico toggle re-witness of the `--uarch` vehicle's own images is closed for all nine (`io_evidence.jsonl` trial `pad-uarch-pcf-toggle-rewitness-20260817`), each toggling under both pulls on exactly its intended lead and no other, matching the pre-existing research-unsafe-vehicle claim pad-for-pad |
-| PIN_25 combined-cell OE/readback | Silicon-qualified exact subset | Hard-zero data with the recorded six-pip OE corridor qualifies constant release/drive-low, static readback, and local-self-toggle dynamic OE. The ordinary PCF path also qualifies stepped external PIN_10-controlled OE and simultaneous readback under both pulls through the exact `RMUX15 -> RMUX53 -> IMUX11` entry. High-rate simultaneous readback, the divergent RMUX20 branch, generic/open-drain/registered OE, and other corridors remain unqualified. Separately, a retained vendor-routed quad oracle silicon-qualifies active-high OE polarity and release/drive-low through the four distinct exact PIN_25-PIN_28 OE corridors (`bidir_left_quad_evidence.jsonl`); ordinary source ingress and simultaneous readback for PIN_26-PIN_28 remain unqualified |
-| Fabric inputs `PIN_10`, `PIN_11`, `PIN_12`, `PIN_15`, `PIN_19` | Silicon-qualified subset | Exact L48 package. `PIN_12` is bounded to its exact scalar, single-consumer direct-combinational path; registered input was also exercised on `PIN_19` |
-| UART0 ROM `TX/RX` on `PIN_30/PIN_31` | Application full duplex silicon-qualified; ROM protocol pending | An exact zero-LUT application image qualifies GPIO7.6/UART0_UARTTXD → PIN_30 → DAP CDC RX and DAP CDC TX → PIN_31 → GPIO6.1/UART0_UARTRXD. It passes 4096 exact bytes each way simultaneously at 9600/38400/115200. The mask-ROM protocol itself remains unqualified |
-| Hard UART0 TX/RX, I2C0 SDA/SCL, SPI0 SCK/MOSI/CSN plus IO1 on L48 `PIN_10`–`PIN_17` and `PIN_30`/`PIN_31` | Silicon-qualified exact L48 subsets | One open peripheral-route image puts UART0 TX on `PIN_10`, I2C0 SDA/SCL on `PIN_11`/`PIN_15`, and SPI0 SCK/CSN/MOSI on `PIN_12`/`PIN_13`/`PIN_14`. Separate exact images qualify UART0 RX on `PIN_31` and full duplex on `PIN_30`/`PIN_31`; the latter transfers 4096 bytes each way at three nominal rates. An active RP2350 open-drain slave at `0x55` qualifies I2C bytes plus exact `2A A6`, repeated START, and `5A C3 7E` ACK/ACK/NACK. Another image adds SPI0 IO1 on `PIN_17`; an active RP2350 PIO slave qualifies 1–4-byte receive values and byte order. These routes are properties of the exact loaded images, not general part pin mappings; I2C needs external pull-ups |
-| Hard UART/SPI/I2C signals on any other pin, and all CAN/Ethernet signals | Unqualified | Register drivers do not imply a package route, and the qualified routes above do not generalize to other pads, other instances, or untested signal directions |
-| USB D+/D- | Dedicated hard PHY | Not ordinary fabric GPIO and not controlled through `GPIOAFSEL` |
+The useful tested routes are summarized below. Detailed hashes, captures and
+bench records live in [HARDWARE_VALIDATION.md](HARDWARE_VALIDATION.md) and the
+files under `qualification/`.
 
-The supporting observations are in
-[hardware qualification](HARDWARE_VALIDATION.md),
-[the UART ROM record](UART_BOOTLOADER.md), and the append-only files under
-[`qualification/`](../qualification/).
+### GPIO / plain fabric IO
 
-## Rules for firmware and board definitions
+| Route | Current result |
+|---|---|
+| `GPIO4.1 -> PIN_34 -> LED1` | Works on the reference board |
+| GPIO4 <-> fabric bridge | Tested with a four-bit inverted loopback |
+| GPIO5 data/OE/input | Two output-data/OE lanes and one return input lane tested |
+| `PIN_25..PIN_28` fabric outputs | All four work on L48 |
+| `PIN_10..PIN_19` fabric outputs | All ten have tested exact output routes; fresh `--uarch` routing still has a PIN_15 gap |
+| `PIN_25` OE/readback | Several static and dynamic OE cases work |
+| fabric inputs on `PIN_10`, `11`, `12`, `15`, `19` | Retained exact examples work, but new PIN_10/PIN_12 input compositions have also failed |
 
-1. Controller drivers stop at the register-block boundary. A driver may enable
-   a UART or SPI instance without claiming a package pin.
-2. Board code may name a peripheral pin only when it identifies the exact
-   part, package, board, and compatible fabric configuration that supplies the
-   route.
-3. An unknown fabric image invalidates hard-peripheral pin assumptions.
-   Firmware should retain recovery access and load a known matching fabric
-   before driving a routed signal.
-4. Software GPIO output examples clear `AFSEL` and use only board nets whose
-   electrical destination is known. “Blink all GPIOs” is not a safe test.
-5. I2C routes require open-drain behavior and external pull-ups. CAN requires a
-   transceiver; Ethernet requires its PHY and clocks. A logical route alone is
-   insufficient evidence.
-6. Package evidence never transfers by pin number to L100, L64, Q32, another
-   PCB, or another part marking.
+The last row is important: input routing is not generally solved just because
+some older exact routes work. `VP-AGM-008` tracks the newer input failures.
 
-AGaMEMnon therefore fails closed: there is no generic
-`set_uart_pin(UART0, PIN_n)` API. Future named routes belong in a board
-definition paired with a fabric artifact/hash and a support-matrix entry.
+### UART
 
-## Qualifying a new route
+- UART0 application full duplex works on `PIN_30` / `PIN_31`.
+- UART0, UART1 and UART2 TX have working campaign routes.
+- UART0 RX works in retained exact routes.
+- UART3/4 TX and broad RX coverage are still open.
+- The mask-ROM UART uses UART0, but the current Pico recovery harness has its own
+  unfinished target-side qualification work; see [UART_BOOTLOADER.md](UART_BOOTLOADER.md).
 
-Record the exact chip marking, package, board revision, fabric artifact and
-SHA-256, source and sink, direction, IO standard/electrical conditions,
-firmware artifact, observable result, transport, and restoration result. Test
-the route in isolation before using it as evidence for a larger design, then
-submit the record through `agamemnon qualify`.
+### I²C
 
-Passing synthesis or routed simulation is useful preflight evidence, but only
-an external observation on the named hardware promotes a package route to
-silicon-qualified.
+I²C0 and I²C1 have working L48 open-drain routes. The main tested transaction is
+an address `0x55` write/read exchange on `PIN_11`/`PIN_15`, with an RP2350 acting
+as the external slave.
+
+I²C needs external pull-ups; routing the signals alone is not enough.
+
+### SPI
+
+SPI0 and SPI1 TX work in tested configurations.
+
+SPI MISO is the awkward part: newer typed SPI0/SPI1 MISO compositions returned
+all ones even though the external slave and vendor controls worked. Those typed
+MISO paths are currently blocked (`VP-AGM-008`).
+
+An older exact SPI0 receive image still works as a retained example, but it is
+not evidence that arbitrary fresh MISO routing works.
+
+### CAN / Ethernet / USB
+
+- CAN and Ethernet do not yet have package-route qualification.
+- CAN additionally needs a transceiver.
+- Ethernet needs the PHY and clocks.
+- USB D+/D- use the hard USB PHY and are not ordinary fabric GPIO signals.
+
+## Practical rule
+
+Do not write firmware APIs that pretend the pin mapping is fixed in silicon.
+This is the wrong abstraction:
+
+```text
+set_uart_pin(UART0, PIN_12)
+```
+
+A board definition should instead pair:
+
+- a specific part/package/board;
+- the fabric configuration that creates the route;
+- the firmware configuration for the peripheral.
+
+If you load an unknown fabric image, assume any previous hard-peripheral pin
+mapping may have disappeared.
+
+## Firmware and board guidelines
+
+1. Peripheral drivers should configure the controller registers, not claim a
+   package pin by themselves.
+2. Board definitions may name a peripheral pin when they also identify the
+   matching fabric route/profile.
+3. Keep a recovery/debug path available when experimenting with routing.
+4. Plain GPIO examples should clear `AFSEL` and only drive known board nets.
+5. I²C requires open-drain + pull-ups; CAN requires a transceiver; Ethernet
+   requires its PHY.
+6. Do not assume the same package pin number means the same tested route on a
+   different package or board.
+
+## Adding a route
+
+For a new physical route, record:
+
+- chip/package/board;
+- fabric source and image hash;
+- signal source/sink and direction;
+- pin and electrical setup;
+- firmware used;
+- what was actually observed.
+
+Test the route by itself before burying it in a large design. Once it works, add
+the result to the normal qualification records.

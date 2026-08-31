@@ -1,195 +1,171 @@
 # The “does-everything” roadmap
 
-This document defines the distance between today's fail-closed subset and a
-completely open, broadly vendor-capable AG32 toolchain. It is a goal map, not a
-support claim. Current state is authoritative in [STATUS.md](STATUS.md) and the
-near-term order is in [ROADMAP.md](../ROADMAP.md).
+This is the long-term checklist for turning AGaMEMnon from a useful experimental
+toolchain into a broadly capable AG32 toolchain. For what works today, see
+[STATUS.md](STATUS.md). For near-term priorities, see [ROADMAP.md](../ROADMAP.md).
 
-The phrase “full vendor parity” is intentionally avoided as a current metric.
-The 2026-08-24 campaign classified 105 hand-authored designs but had no sealed
-holdout. It found 25 narrow parity successes, 52 routability gaps, and 13
-correctness escapes. That evidence is strong enough to guide work and too small
-and selected to estimate arbitrary-design success.
+The 2026-08-24 campaign is a useful snapshot: 25 successes, 52 designs that did
+not route, 13 images that built cleanly but failed on hardware, 12 unusable or
+unstable vendor references, and 3 incomplete tests. That is enough to show where
+the hard problems are, but not enough to assign a meaningful “percent complete.”
 
-## What “does everything” would require
+## What done looks like
 
-A complete result must satisfy all of these independently:
+A reasonably complete toolchain needs:
 
-1. **Open representation:** every emitted configuration field has a public
-   meaning, provenance, and open encoder; no closed executable or copied design
-   image is required.
-2. **Architecture coverage:** all usable logic, routing, clock, memory, IO,
-   hard-block, MCU-boundary, and package resources are represented.
-3. **Robust implementation:** ordinary and structural RTL place and route over
-   realistic widths/utilization without per-design route patches.
-4. **Logical correctness:** synthesis, packing, timing semantics, and routed
-   evaluation agree with independent models across a broad generated suite.
-5. **Physical correctness:** exact board contracts pass across modes, clocks,
-   placement regions, PVT, simultaneous use, and supported packages.
-6. **Fail-closed completeness:** unsupported or known-wrong surfaces are
-   identified before an image is emitted, rather than by silent target failure.
-7. **Deployment completeness:** reproducible releases, safe programming and
-   recovery, stable APIs, documentation, and hardware fixtures exist.
+1. an open encoder for the bitstream and configuration fields;
+2. a device model covering the useful logic, routing, clocks, memories, IO,
+   hard blocks, MCU interfaces, and packages;
+3. placement and routing that works on realistic designs without hand-pinned
+   routes;
+4. correct synthesis and packing;
+5. hardware results that agree with the logical model across the supported
+   operating range;
+6. clear errors for known unsupported cases instead of silently bad images;
+7. boring installation, programming, recovery, APIs, docs, and releases.
 
-No one item substitutes for another. In particular, byte-exact encoding and a
-correct routed Boolean model do not imply physical correctness; the campaign's
-BRAM, input, MISO, clock-reach, and density escapes demonstrate that gap.
+The first two are much further along than the rest.
 
-## Configuration surface
+## Configuration
 
-The image has three useful conceptual planes:
+The fabric image can be thought of as three parts:
 
-| Plane | Current state | Completion condition |
+| Area | Current state | Remaining work |
 |---|---|---|
-| Global/configuration-chain preamble | Openly generated; exact retained profiles and a bounded HSE=8 silicon frequency surface | All sources, outputs, modes, and reset/clock semantics decoded and qualified |
-| Design-neutral fabric body | Generated from open code/data, byte-exact to the decoded reference body, accepted by L48 FCB | Functions of remaining reserved/unnamed fields explained; behavior qualified beyond acceptance |
-| Design overlays: cells/routes/hard blocks | Partial, evidence-tiered, strict conflict rejection | Every supported resource/mode encoded from public data with complete semantic and physical evidence |
+| Global/preamble configuration | Generated openly; several PLL/clock profiles work | Decode and test the remaining clock/PLL modes |
+| Design-neutral fabric defaults | Generated from open data and byte-identical to the decoded reference body | Name the remaining unknown/reserved fields |
+| Design-specific configuration | Partial support for logic, routing, IO, BRAM, clocks and MCU interfaces | Complete the missing resources and modes |
 
-The old “copy the canvas” blocker is closed: the base is generated. The new
-frontier is naming and qualifying what designs put on that base.
+The old dependency on copying a vendor-generated base image is gone. The main
+problem now is understanding and correctly using everything layered on top of
+that base.
 
 ## Routing and placement
 
-### Already established
+Already useful:
 
-- a large exact physical and unanimous-relative selector corpus;
-- zero-counterexample closed forms for bounded regular classes;
-- conflict preservation and strict refusal;
-- all 14 edges in the invalid historical negative catalogue conduct in bounded
-  positive witnesses;
-- exact small and peripheral compositions across much of the L48 fabric.
+- a large recovered selector database;
+- exact selector formulas for some regular routing classes;
+- conflict detection instead of guessing;
+- positive isolated tests for all 14 edges that were once thought to be dead;
+- many working small and peripheral-oriented routes on L48.
 
-### Still required
+Still missing:
 
-- honest whole-device topology/selector coverage metrics, distinct from an
-  observed-corpus denominator;
-- special-block, pad, MCU-exit, BRAM, and clock feeder completion;
-- deterministic wide placement and negotiated routing;
-- user/structural feasibility convergence where semantics are equivalent;
-- congestion/density rules validated on silicon rather than inferred from
-  individual edges;
-- scalable timing with clock skew, IO, BRAM, PLL, package, and PVT models.
+- a useful whole-chip coverage metric;
+- several special feeders around IO, MCU, BRAM and clocks;
+- reliable placement/routing for wide designs;
+- similar routability for equivalent RTL and primitive-level versions;
+- a better model for congestion and density;
+- proper timing for clocks, IO, BRAM, PLLs, packages and PVT.
 
-The campaign's 52 routability gaps are the current benchmark pool. A general
-algorithmic improvement must move a family without adding a route pin or
-weakening selector policy.
+The 52 no-route campaign designs are the obvious regression set for router work.
+A useful improvement should fix a class of them, not one hand-picked netlist.
 
-## Logic, state, and correctness
+## Logic and state
 
-Small Boolean, shift, arithmetic, LFSR, fanout, counter, and AHB vehicles prove
-useful exact points. Open defects `VP-AGM-001` and `003`–`005` show that
-feedback, next-state, rotate/reset, and add/reset compositions remain unsafe to
-generalize. `VP-AGM-009` shows that a 13%-register, 7–8%-LUT user design can
-match the routed evaluator and still diverge on silicon.
+Small Boolean functions, shifts, arithmetic, LFSRs, counters, fanout and AHB
+examples work in several tested configurations.
 
-Completion requires:
+The important failures are `VP-AGM-001` and `VP-AGM-003` through
+`VP-AGM-005`, covering feedback, FSM updates, rotate/reset and add/reset, plus
+`VP-AGM-009`, where a moderately large state-heavy design simulated correctly
+but diverged on hardware.
 
-- minimized triggers and fail-closed guards for every escape family;
-- generalized repairs that pass the original preregistered contracts;
-- broad metamorphic/generated model suites;
-- density, placement-region, reset, clock-enable, and simultaneous-net
-  coverage;
-- a sealed holdout created only after architecture and admission rules freeze.
+To close this area we need to minimize those failures, find the actual causes,
+fix the general mechanisms, and add generated stress tests for placement,
+reset, clock enables, feedback and density. A sealed holdout only becomes useful
+after those rules stop moving every few days.
 
 ## MCU/fabric boundary
 
-The exact public32 map, retained narrower banks, constant endpoints, status
-overlays, and local-interrupt composition establish a strong but narrow slave
-boundary. The wide frontier remains:
+The retained `public32` map, smaller register banks, constant endpoints, status
+overlays and local-interrupt examples give us a useful AHB slave path.
 
-- fresh `regbank16` no-image;
-- placement divergence in `addsub16`;
-- generic application-owned state and overlays;
-- complete AHB request/control semantics, alternate clocks/resets, wider
-  address decode, bursts, and error behavior;
-- AHB master and DMA.
+The obvious next steps are:
 
-The exact public32 composer reproduces its existing reviewed artifact by
-replaying and validating the reviewed branch; no reviewed hash moved. A future
-different candidate must be semantically reviewed and requalified, never
-simply repinned.
+- make a fresh `regbank16` route;
+- fix the placement problems exposed by `addsub16`;
+- support application-owned state without replaying an exact old route;
+- broaden address/control/burst/reset/clock behavior;
+- eventually add AHB master and DMA support.
 
-## BRAM, PLL, clocks, and carry
+The current `public32` template is a replay of a reviewed route, not yet a
+general register-bank generator.
 
-### BRAM
+## BRAM
 
-Retained exact X13Y4 corridors and profiles are not a general BRAM model.
-`VP-AGM-006` proves that currently modeled INIT/config equality can coexist with
-zero reads on alternate x1/x18 compositions. Completion needs the missing
-static/read field or physical-path explanation, then systematic sites, widths,
-ports, clocks, outputs, writes, mixed modes, collisions, and inference.
+There are working X13Y4 examples, but BRAM is still one of the least trustworthy
+parts of the open flow. `VP-AGM-006` produced zero reads from new x1/x18
+configurations even though the currently modeled INIT and configuration fields
+looked right.
 
-### PLL and clocks
+The next job is to find the missing static/read-path behavior. After that come
+other sites, widths, ports, clocks, registered outputs, writes, mixed-width
+modes, collision behavior and inference.
 
-Bounded divider/output-frequency evidence is strong for HSE=8. `VP-AGM-007`
-shows that far-site state delivery is not thereby qualified. Completion needs
-clock networks/regions/seams, gating/reset, alternate outputs and HSEs,
-phase/duty/feedback/bypass, and placement-aware physical validation.
+## PLL and clocks
 
-### Carry
+Many HSE=8 divider/output-frequency points work. That does not solve clock
+distribution: `VP-AGM-007` showed a five-site state design staying at zero even
+though the routed logical model was correct.
 
-Same-tile, one X20 corridor, and one seam are exact points. Completion needs
-all columns/seams, multiple simultaneous chains, density, branching policy,
-timing, and fallback equivalence.
+Remaining work includes clock regions and seams, gating/reset, other PLL
+outputs and HSE sources, phase/duty/feedback/bypass modes, and a real
+placement-aware timing model.
+
+## Carry
+
+Carry works at several exact footprints: same-tile chains, one long X20
+corridor, and one tested seam. It still needs wider placement coverage,
+multiple simultaneous chains, branching rules, density tests and timing.
 
 ## IO and peripherals
 
-Exact L48 outputs, bounded OE, UART0/1/2 TX, SPI0/1 TX, and I²C0/1 active
-open-drain transactions are the current positive boundary. `VP-AGM-008`
-captures the counterexample: exact-looking PIN_10/PIN_12 ingress and SPI0/SPI1
-MISO compositions can be physically stuck.
+The current positive set includes L48 outputs, some OE paths, UART0/1/2 TX,
+SPI0/1 TX and I²C0/1 transactions. The main counterexample is `VP-AGM-008`:
+new PIN_10/PIN_12 input paths and SPI0/SPI1 MISO paths did not work.
 
-Completion requires:
+Long term this needs:
 
-- generic physical ingress and bidirectional IO across every supported pin;
-- electrical modes, voltage banks, drive/slew/pulls/Schmitt, simultaneous IO,
-  PVT, and signal integrity;
-- UART RX and full controller-mode breadth;
-- repaired SPI MISO, then duplex, modes, dual/quad, DMA/interrupt, and timing;
-- broad I²C transfers, stretching, addressing, arbitration, simultaneous
-  controllers, electrical margins, and DMA/interrupt;
-- timers, CAN with a transceiver, USB device/host/OTG, Ethernet with a PHY,
-  external ADC/DAC/comparator fixtures, RTC clocking, and peripheral DMA;
-- independent board qualification for L64, Q32, L100, and AG32VH/PSRAM parts.
+- generic input and bidirectional routing across supported pins;
+- pull, drive, slew, Schmitt, bank-voltage and simultaneous-IO behavior;
+- UART RX and more framing/mode coverage;
+- repaired SPI MISO, then duplex, other modes, dual/quad and DMA/interrupt;
+- wider I²C coverage including stretching, arbitration and simultaneous buses;
+- timers, CAN, USB, Ethernet, ADC/DAC/comparators, RTC and peripheral DMA;
+- independent testing of L64, Q32, L100 and the AG32VH/PSRAM parts.
 
 ## CPU-scale and real workloads
 
-The retained SERV route is an exact replay, not broad CPU proof. A fresh SERV
-build/simulation result is lower-tier evidence until the image passes a complete
-board contract. CPU-scale completion needs:
+`serv-blinky` is a useful retained integration example, but replaying one known
+route does not tell us whether fresh CPU-scale designs are reliable.
 
-- repeatable fresh placement/routing without route pins;
-- directly observed register-file writes and BRAM semantics;
-- broad instruction, branch, load/store, exception, CSR, interrupt, and trap
-  coverage;
-- several unrelated applications and generated workloads;
-- a sealed, independently scored holdout.
+Before calling this area healthy we need repeatable fresh routing, direct BRAM
+and register-file tests, much broader instruction/exception/interrupt coverage,
+and several unrelated real applications.
 
-Results must be reported separately as build success, logical/model success,
-physical success, and vendor comparison.
+## Toolchain quality
 
-## Toolchain and release system
+The backend also needs ordinary product work:
 
-A complete technical backend still needs a usable product boundary:
+- reproducible Windows/Linux/macOS installation;
+- deterministic database generation;
+- useful placer/router failure diagnostics;
+- reliable DAP/USB/UART programming and recovery;
+- automated hardware-in-the-loop tests;
+- stable project, SDK and primitive APIs;
+- documentation generated from, or at least checked against, the same data used
+  by the tests.
 
-- reproducible Windows/Linux/macOS installation and pinned tool bundles;
-- deterministic database generation and reviewed cache/artifact updates;
-- fast, diagnostic placer/router failure reports;
-- safe DAP/USB/UART programming, backup, verify, and recovery;
-- append-only normalized evidence and automated fixture control;
-- stable project, SDK, and primitive APIs;
-- documentation whose support statements are generated from or checked
-  against the same evidence manifests.
+## Current priorities
 
-## Ranked next actions
+1. Explain `VP-AGM-006` through `VP-AGM-009`.
+2. Make the wide AHB/state designs place and route without one-off exceptions.
+3. Fix physical input/SPI MISO before adding more RX features.
+4. Automate more hardware testing.
+5. Once the architecture rules settle down, build a sealed holdout suite.
 
-1. Explain `VP-AGM-006` through `009` and add generalized refusal/repair rules.
-2. Improve wide placement/routing on `regbank16`, `addsub16`, and the 256-bit
-   pair without per-design exceptions.
-3. Repair and requalify physical ingress/SPI MISO before adding RX breadth.
-4. Establish automated hardware-in-the-loop coverage, then freeze rules and
-   create a sealed holdout.
-
-The finish line is not “a large database” or “one impressive demo.” It is an
-open toolchain that can state, test, and enforce the difference between what it
-knows how to encode and what it has proved will work.
+The finish line is simple to describe: arbitrary-looking designs should usually
+build, supported features should usually work, and when they cannot work the
+tool should know why.

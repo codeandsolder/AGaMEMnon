@@ -1,162 +1,143 @@
 # Roadmap
 
-AGaMEMnon's next phase is correctness and breadth, not a declaration of full
-vendor parity. The 2026-08-24 campaign produced narrow silicon proofs and a
-larger set of precise failures: 25 parity successes, 52 routability gaps, and
-13 correctness escapes among 105 hand-authored designs, with no sealed
-holdout. [STATUS.md](docs/STATUS.md) is authoritative for current support;
-this file lists unfinished work.
+For what works today, see [docs/STATUS.md](docs/STATUS.md). This page is the
+shorter list of what to fix next.
 
-## P0: keep the release boundary reproducible and fail-closed
+The August 2026 campaign found 25 working model/vendor/open comparisons, 52
+designs that did not route, and 13 images that built cleanly but failed on
+hardware. The next useful work is therefore mostly correctness and routability,
+not recovering one more obscure feature.
 
-1. **Keep exact-map composition deterministic.** Public32 now explicitly
-   replays the existing reviewed status-pending branch while validating every
-   hop against the current strict graph; the full suite is green and no
-   reviewed route/image hash moved. Any future mismatch still follows
-   [LANDING_A_CHIPDB_CHANGE.md](docs/LANDING_A_CHIPDB_CHANGE.md): inspect the
-   semantic route/config delta and change a reviewed hash only after the
-   required evidence. Never repin merely to obtain a green suite.
-2. **Turn demonstrated silent-wrong families into explicit refusals.** Typed
-   SPI0/SPI1 MISO and affected initialized-BRAM profiles already fail closed.
-   Add similarly generalized pre-emission guards when the identifiable trigger
-   for `VP-AGM-001`, `003`–`005`, `007`, and `009` is known. Until then, keep
-   their artifacts excluded and the surrounding support claims exact.
-3. **Keep evidence release-clean.** Every qualification update must preserve
-   append-only ledgers, deterministic manifests, path-leak checks, authorship,
-   board identity, volatile-first execution, and final reset/restoration.
+## P0: do not regress known working designs
 
-## P1: explain the correctness escapes
+- Keep retained routes/images reproducible.
+- When a reviewed checkpoint changes, inspect the route/config difference rather
+  than blindly updating its hash.
+- Keep exact known-bad images/logical graphs blocked.
+- Keep qualification records append-only so old conclusions can be corrected
+  without erasing the history.
 
-These defects survived clean synthesis/routing, strict selector accounting,
-byte-identical repack, and model-backed checks. They are therefore higher
-priority than adding adjacent examples.
+See [docs/LANDING_A_CHIPDB_CHANGE.md](docs/LANDING_A_CHIPDB_CHANGE.md) for the
+checkpoint workflow.
 
-| Defect | Next discriminating work | Required closure |
+## P1: explain the current hardware failures
+
+These are more important than adding adjacent features because the existing
+logical/router checks did not catch them.
+
+| Defect | Problem | Next useful experiment |
 |---|---|---|
-| `VP-AGM-001` feedback | Isolate the MCU read-data feedback composition with matched placement/route A/Bs and an independent observable | General cause and emitter/router repair; original contract passes |
-| `VP-AGM-003` FSM | Trace the missing `fsm_state[0]` update across clock, data, and cell configuration with a minimal sensitized vehicle | Exact failure mechanism, permanent regression, silicon pass |
-| `VP-AGM-004` rotate | Separate reset/startup from rotate datapath behavior; keep the already-corrected selector exonerated | Repair that generalizes beyond one image |
-| `VP-AGM-005` add/reset | Minimize the wrong reset snapshot across default-LUT and hard-carry forms | Shared reset/update cause identified and fixed |
-| `VP-AGM-006` BRAM | Differentially recover the missing static/read-path field or prove the alternate output corridor causal | x1 and x18 contracts pass from fresh strict builds before read profiles reopen |
-| `VP-AGM-007` clock reach | A/B clock/data delivery by region with the same five fixed sites and correct routed discriminator | Region/clock mechanism plus generalized placement/emission rule |
-| `VP-AGM-008` ingress | Recover the complete pin-specific input chain and separate physical pad enable from route conduction | Held PIN_10/PIN_12 and typed SPI0/SPI1 MISO contracts all pass before generic ingress reopens |
-| `VP-AGM-009` density | Reduce the 256-bit divergence while preserving the transaction-2 failure; test clock/power/routing-density hypotheses | Generalized remedy that passes the exact 1,024-transaction contract |
+| `VP-AGM-001` | MCU read-data feedback diverges on hardware | Minimize with matched route/placement variants |
+| `VP-AGM-003` | FSM loses a next-state bit | Trace clock/data/config on the smallest reproducer |
+| `VP-AGM-004` | four-bit rotate/reset vehicle fails | Separate reset/startup from rotate datapath |
+| `VP-AGM-005` | add/sub forms share a bad reset state | Minimize the common reset/update path |
+| `VP-AGM-006` | initialized BRAM reads zero | Find missing static/read-path configuration or bad output corridor |
+| `VP-AGM-007` | far-spread registers stay at zero | Compare clock/data delivery by region |
+| `VP-AGM-008` | PIN inputs and SPI MISO fail | Recover the complete pad/input chain |
+| `VP-AGM-009` | 256-bit state diverges after routing | Minimize while preserving the second-transaction failure |
 
-No raw bitstream surgery, design-specific route pin, target relaxation,
-unreviewed selector admission, or test-hash repin counts as a fix.
+The goal for each is a general cause/fix, not a route pinned around one failing
+example.
 
-## P2: make wide MCU/fabric designs route and remain correct
+## P2: make wider designs route reliably
 
-The X13Y12 ingress coverage gap is solved, but the next width step is not:
+Current stress cases:
 
-- `regbank16` remains a bounded no-image result downstream of the recovered
-  ingress;
-- `addsub16` reaches the intended density policy but exposes placement
-  divergence;
-- the user 256-bit state vehicle required 13 attempts and then failed on
-  silicon; the structural rewrite produced no image;
-- the retained public32 map is an exact replay, not a generic bank generator.
+- `regbank16` still produces no image;
+- `addsub16` exposes placement problems;
+- the 256-bit user design needed many attempts and then failed on hardware;
+- its structural equivalent does not route;
+- `public32` is still a retained exact route rather than a generic bank.
 
-Work in this order:
+Work here should focus on placer diagnostics, corridor pressure and negotiated
+routing. Then expand fresh AHB state beyond the currently retained footprints.
 
-1. add deterministic placer diagnostics for resource/corridor pressure and
-   explain why user/structural equivalents diverge;
-2. improve legal placement and negotiated routing without admitting ambiguous
-   selectors or overfitting a single design;
-3. qualify fresh simultaneous HWDATA/HRDATA state beyond the retained 16-bit
-   scratch footprint;
-4. add reservation-aware application overlays around the exact AHB core;
-5. pursue AHB master/DMA only after wide slave state is repeatable and correct.
+AHB master/DMA can wait until wide AHB slave designs are routine.
 
-## P3: peripheral breadth
+## P3: peripheral coverage
 
-The campaign closed TX and one repeated-START transaction, not whole
-controllers.
+### UART
 
-- **UART:** UART3/4 TX; RX campaigns for UART0–4; framing variants, break, flow
-  control, FIFO pressure, interrupt/DMA, clock accuracy, alternate pads and
-  packages.
-- **SPI:** repair physical MISO first; then RX/duplex, modes beyond the current
-  fixed contract, dual/quad, DMA/POLL/interrupt, simultaneous controllers,
-  timing/PVT, and alternate pads.
-- **I²C:** broader lengths, STOP-delimited sequences, I²C1 stretching,
-  longer/unbounded stretch, 10-bit addressing, arbitration/multimaster,
-  simultaneous I²C0/I²C1, interrupts/DMA, and electrical margins.
-- **GPIO/IO:** general ingress and bidirectional direction changes; per-pin
-  pulls, drive strength, slew, Schmitt behavior, voltage banks, and other
-  packages.
-- **Remaining hard blocks:** timers, CAN with a transceiver, USB host/OTG,
-  Ethernet with a PHY, ADC/DAC external analog fixtures, comparators, RTC with
-  a low-speed clock, and peripheral-linked DMA.
+- UART3/4 TX;
+- UART0-4 RX;
+- more framing, break and flow control;
+- interrupts/DMA;
+- alternate pins/packages.
 
-Every new family needs a fixed observable contract, independent model where
-applicable, fresh controls, multiple vendor seeds or an explicit unusable
-reference verdict, fresh open builds, and exact scope exclusions.
+### SPI
 
-## P4: fabric hard blocks and clocking
+Fix MISO first. Then:
 
-- Recover and qualify the BRAM static/read surface before adding modes.
-- Extend BRAM sites, widths, ports, address range, writes, mixed widths,
-  independent clocks, output registers, and collision semantics one bounded
-  contract at a time.
-- Resolve far-site clock/state delivery before claiming broad PLL reach.
-- Qualify clock regions, seams, global networks, gating, reset, alternate PLL
-  outputs, phase/duty/feedback/bypass, and additional HSE sources.
-- Expand carry evidence beyond the exact same-tile/X20/seam footprints and
-  test large carry compositions under density.
-- Replace conservative timing families with exact cell/wire/clock/IO/BRAM
-  models and multi-corner silicon correlation. Until then timing is guidance,
-  not sign-off.
+- duplex/RX;
+- more modes;
+- dual/quad;
+- DMA/interrupt;
+- simultaneous controllers and alternate pins.
 
-## P5: routing and architecture breadth
+### I²C
 
-- Quantify actual graph/topology coverage separately from the recovered-corpus
-  denominator.
-- Recover missing special-block and IO feeders with conflict-aware provenance.
-- Improve placement/routing success on the 52 campaign gaps through general
-  algorithms, not per-design patches.
-- Add metamorphic and independently generated workloads only after escape
-  triggers have effective fail-closed guards.
-- Create a genuinely sealed holdout suite; keep it sealed until models,
-  adapters, and admission rules are frozen. Report its denominator separately
-  from hand-authored development vehicles.
-- Keep `research-unsafe` provenance explicit and never promote majority or
-  predicted selector knowledge without the required evidence.
+- more lengths/transaction shapes;
+- I²C1 stretching and longer stretches;
+- 10-bit addressing;
+- arbitration/multimaster;
+- simultaneous buses;
+- DMA/interrupt and electrical margins.
 
-## P6: packages, boards, and deployment
+### Other blocks
 
-- Complete L64 investigation without inheriting L48 claims; resolve its AHB
-  mismatch before promotion.
-- Qualify Q32 and L100 on actual boards, using physical bond maps rather than
-  same-numbered-pin assumptions.
-- Add AG32VH PSRAM decoding and fixtures as a separate track.
-- Preserve the safe programming order: identify, backup, volatile test, write
-  only with explicit authorization, verify, and restore/recover.
-- Finish target-side mask-ROM UART qualification and interrupted-operation
-  recovery.
-- Maintain hash-verified Windows/Linux SDK bundles and the qualified OpenOCD
-  installer; make toolchain/runtime mismatches diagnostic rather than routing
-  failures.
+Timers, CAN with a transceiver, USB host/OTG, Ethernet with a PHY, external
+ADC/DAC/comparator tests, RTC clocking and peripheral-linked DMA all need more
+work.
 
-## P7: CPU-scale and real designs
+## P4: BRAM, clocks and carry
 
-The retained SERV route remains a useful exact replay. It is not fresh design
-parity or RV32I compliance. Re-enter CPU-scale work only after wide placement,
-BRAM behavior, and correctness guards improve:
+### BRAM
 
-1. fresh-route the retained workload repeatedly with no route pins;
-2. prove register-file writes directly rather than through wrapper-visible
-   transparency;
-3. expand instruction, branch, load/store, exception, CSR, interrupt, and trap
-   coverage;
-4. add unrelated application designs and a sealed holdout set;
-5. report build success, model correctness, silicon correctness, and vendor
-   comparison as separate outcomes.
+First fix the read/static-config problem behind `VP-AGM-006`. Then expand sites,
+widths, ports, address range, writes, mixed widths, independent clocks, output
+registers and collision behavior.
 
-## Promotion rule
+### Clocks
 
-A roadmap item moves to [STATUS.md](docs/STATUS.md) only when its public source,
-route/config provenance, strict build, independent checks, board identity,
-observable contract, negative controls, restoration record, and scope
-exclusions are reviewable. “The tool emitted an image” and “the FCB accepted
-it” are milestones, not completion.
+Resolve the far-region state failure before claiming broad clock reach. Then
+map regions/seams, gating/reset, alternate PLL outputs, phase/duty/feedback
+options and more HSE sources.
+
+### Carry
+
+Expand beyond the currently tested same-tile, X20-corridor and seam cases;
+include multiple chains, density and timing.
+
+## P5: routing model
+
+- Measure actual whole-device topology coverage, not only coverage of recovered
+  corpus rows.
+- Fill missing special-block/IO feeders.
+- Improve the 52 no-route campaign designs with general algorithms.
+- Add generated/metamorphic workloads after the current correctness failures
+  are better understood.
+- Build a sealed holdout set once the architecture rules stop changing.
+
+## P6: packages and boards
+
+- Finish L64 bring-up and explain its AHB mismatch.
+- Test Q32 and L100 on real boards.
+- Treat AG32VH/PSRAM as a separate track.
+- Finish the target-side Pico/UART recovery test.
+- Keep tool bundles and OpenOCD installs reproducible across operating systems.
+
+## P7: CPU-scale designs
+
+The retained SERV route is useful, but fresh CPU-scale work should wait until
+wide placement and BRAM are less fragile.
+
+Then:
+
+1. fresh-route SERV repeatedly without route pins;
+2. test register-file writes and BRAM directly;
+3. broaden instruction/load/store/branch/CSR/interrupt/exception coverage;
+4. add unrelated applications;
+5. include CPU-scale cases in the eventual holdout suite.
+
+A roadmap item is done when the implementation and the relevant hardware tests
+are in the repository and the status page can state plainly what now works.

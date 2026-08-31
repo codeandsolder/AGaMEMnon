@@ -1,73 +1,81 @@
-# The AG32 configuration-surface partition
+# AG32 configuration surface
 
-> Working model for decoding the *entire* AGRV2K configuration bitstream, so the
-> open flow both **generates** every bit from scratch (no vendor canvas) and **knows** what every
-> bit does (static decode completeness). Grounded in the measured canvas decode
-> ([FABRIC_DEFAULT_CANVAS.md](FABRIC_DEFAULT_CANVAS.md)) and sharpened by an insight: the big
-> undecoded region is *cell/routing config*, and whatever falls outside it is *config for
-> something else* — the subsystems and peripherals.
+A useful way to organize the AGRV2K bitstream is to split it into three areas:
+logic, routing, and everything around the fabric.
 
-## The three planes
+This is mainly a reverse-engineering map. For what AGaMEMnon can actually build
+and run today, see [STATUS.md](STATUS.md).
 
-The 99,936-byte raw config decomposes into distinct **planes**, each a different *kind* of config:
+## 1. LUT contents
 
-1. **LUT function plane** — the logic-cell truth tables (`LUT INIT`). **Decoded**
-   (`physmap.init_bit_pos`, 33,792 positions; unconfigured default `0x00`). This is *what each
-   cell computes*.
-2. **Routing / cell-interconnect plane** — the mux/selector fabric (`CFG_RMUX / IMUX / OMUX /
-   CTRLMUX / SEAMMUX / BBMUXS / IOMUX`). This is *how the cells connect* — "what the cells do" in
-   the wiring sense. It is the big `0xFF` region of the canvas (four aligned rectangles over the
-   116-byte word-line grid — the main block cols 59-114 plus top/bottom seam-selector bands —
-   28,570 body bytes / 228,560 bits at their all-ones reset default). Position and reset value are
-   fully decoded and generated from scratch; **~26% of bit-line *functions* named, ~74% not yet
-   mapped** to resources. Full decode = the per-LogicTile bit-line→resource map (promoted
-   2026-08-14 as `agamemnon/chipdb/logictile_config_template.csv`).
-3. **Subsystem / peripheral config plane** — everything that is neither a logic cell nor a fabric
-   route: clock/PLL (in the preamble, decoded), IO electrical / OE / bank config, BRAM
-   modes/ports, and the hard-block edge interfaces. This is the *"config for something else"* —
-   and it is exactly the peripheral surface.
+The LUT truth-table bits are understood:
 
-## The insight, expanded
+- 33,792 physical LUT INIT positions;
+- mapped by `physmap.init_bit_pos`;
+- unconfigured default is zero;
+- bit positions and polarity are known.
 
-The read: *the big undecoded region is probably the config bits for the cells (what they do);
-what we don't know is probably config for something else.* Measurement supports it — the `0xFF`
-region sits in the routing/mux families, so it IS the cell-interconnect plane at default. That
-reframes the whole "completely open" problem as **decode each plane**:
+This part is in good shape.
 
-- Plane 1 (LUT function): **done**.
-- Plane 2 (routing/cell config): the crossbar bit-line map is promoted and applied — every
-  reserved bit-line has `{position, reset}`, and the canvas-retirement half landed 2026-08-14
-  (the from-scratch base is the default). The know-every-bit half stays open: naming the
-  *function* of the unnamed ~74% completes the static routing decode. It does
-  not by itself complete functional or silicon parity.
-- Plane 3 (subsystem/peripheral config): decode each subsystem's config → this is *"knowledge of
-  all the peripherals."*
+## 2. Routing and cell interconnect
 
-**A completely open encoder requires all three planes to be generated from the
-public architecture database. Functional parity additionally requires robust
-placement/routing, logical equivalence, and composition-level silicon proof.**
+This is the large selector/mux area containing families such as:
 
-The 2026-08-24 campaign made that separation unavoidable. Images with exact
-known selectors and correct routed logical models still failed in BRAM,
-physical-input, SPI MISO, far-site clock/state, and dense-state contracts. Full
-decode is necessary for parity; it is not sufficient.
+- RMUX
+- IMUX
+- OMUX
+- CTRLMUX
+- SEAMMUX
+- BBMUXS
+- IOMUX
 
-## Roadmap
+The from-scratch base generator knows where these bits live and what their reset
+values are. The main `0xFF` region of the old vendor canvas belongs here, not to
+LUT INIT as an earlier theory claimed.
 
-| Plane / surface | Decode state | To close it |
-|---|---|---|
-| LUT function | ✅ decoded | — |
-| Routing / cell interconnect | ✅ position+reset decoded, generated 100% from scratch (promoted `logictile_config_template.csv` + `border_edge_partial_cells.csv`, 2026-08-14); ⚠️ ~74% of bit-line *functions* unnamed | name the unnamed ~74% bit-line functions and the 15 `XXXX` spares |
-| Clock / PLL | ✅ decoded (preamble) | — |
-| IO electrical / OE / bank | ⚠️ partial | per-pad/bank config decode (some in `io_evidence`) |
-| BRAM modes / ports | ⚠️ subset | width / mode / port / collision config decode |
-| Hard-block edge (MCU-AHB, DMA, interrupts) | ⚠️ subset qualified | the MCU-edge + peripheral-interface decode |
-| Hard MMIO peripherals | ⚠️ subset qualified | full peripheral catalog + qualification (tracked in the peripheral catalog) |
+`agamemnon/chipdb/logictile_config_template.csv` contains the promoted
+LogicTile map. Roughly 26% of the selector bit-lines currently have semantic
+names; the remaining ~74% have known positions/reset values but not yet known
+individual functions. There are also 15 `XXXX` spare bits whose purpose is
+unknown.
 
-`hypothesis` markers: plane-2 = cell-interconnect is measurement-backed (family overlap); the
-crossbar table is promoted and supplies position/reset for every reserved bit-line, but the
-per-bit *function* of the unnamed ~74% remains unproven; the
-plane-3 boundary (which residue bits are IO vs BRAM vs hard-block) is a working partition, not yet
-bit-exact. The config-plane decode (planes 1-2) is tracked in
-[FABRIC_DEFAULT_CANVAS.md](FABRIC_DEFAULT_CANVAS.md); the peripheral surface (plane 3 + the hard
-MMIO blocks) is tracked in the peripheral catalog.
+So there are two different notions of “decoded” here:
+
+- **byte/position complete:** enough information exists to regenerate the
+  design-neutral body exactly;
+- **semantic complete:** every individual bit has a known function.
+
+The first is essentially done for the base image. The second is not.
+
+## 3. Clocks, IO, BRAM and hard-block interfaces
+
+Everything that is not ordinary LUT/routing configuration lands in this bucket:
+
+- clock and PLL setup;
+- IO electrical settings and OE;
+- BRAM modes and ports;
+- MCU/fabric boundary configuration;
+- other hard-block interfaces.
+
+Coverage varies a lot by subsystem. Some PLL fields are well understood; BRAM
+and physical input behavior still have major holes.
+
+## Current map
+
+| Surface | State |
+|---|---|
+| LUT INIT | Positions and function decoded |
+| Routing/cell interconnect | Positions/reset values regenerated; many individual selector functions still unnamed |
+| Clock/PLL | Useful subset decoded and generated |
+| IO electrical/OE/banks | Partial |
+| BRAM modes/ports | Partial |
+| MCU/hard-block interfaces | Partial |
+| Hard MMIO peripherals | Partial firmware/register coverage |
+
+The old “vendor canvas dependency” problem is solved: AGaMEMnon can generate the
+design-neutral base image from public data. The interesting remaining work is
+understanding what all of the still-unnamed fields do and correctly configuring
+them for real designs.
+
+More detail on the base image is in
+[FABRIC_DEFAULT_CANVAS.md](FABRIC_DEFAULT_CANVAS.md).
