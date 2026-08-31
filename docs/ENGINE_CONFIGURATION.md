@@ -1,123 +1,90 @@
-# Engine configuration and evidence registry
+# Engine configuration and experimental switches
 
-The AGRV2K architecture generator and bit generator have accumulated switches
-used by routing experiments and silicon-isolation campaigns. They are now
-registered in `agamemnon/engine/registry.py`. That registry is the source of
-truth for each variable's default, type, consumer, maturity, evidence tier,
-evidence, and short meaning. The generated [D0 claim-policy ledger](CLAIM_POLICY_LEDGER.md)
-shows both independent axes for every option, constant, and emitted feature.
+AGaMEMnon has accumulated a lot of environment variables while reverse
+engineering the chip. They are registered in `agamemnon/engine/registry.py`,
+which records the default, type, consumer and maturity of each option. The
+generated [claim-policy ledger](CLAIM_POLICY_LEDGER.md) is the exhaustive list;
+this page explains the parts a human is likely to care about.
 
-The same registry can be serialized into a stable manifest for tests and
-downstream tooling, which makes it a practical foundation for both the refactor
-and the parity program.
+`agamemnon manifest` dumps the registry as JSON. `--scope arch` and
+`--scope bitgen` limit it to one side of the engine.
 
-Registry maturity and evidence apply to the named option or feature, not to
-every design that composes it. The 2026-08-24 campaign found clean images that
-failed in BRAM, physical ingress, SPI MISO, far-site state, and dense state.
-Feature admission is necessary for a release build; composition-level silicon
-qualification remains separate. Known typed SPI MISO and affected BRAM
-profiles now have explicit defect refusals.
+## Maturity labels
 
-`agamemnon manifest` emits that snapshot as stable JSON, with `--scope`
-filtering the option half down to `arch` or `bitgen` while always including the
-constant set.
+- `release`: part of the normal build path;
+- `experimental`: useful for a specific investigation, but not enabled normally;
+- `archival`: kept so old experiments can be replayed;
+- `diagnostic`: changes logging or inspection rather than the emitted design.
 
-The maturity labels are deliberate:
+There is also a separate evidence field used by the generated policy machinery.
+Unless you are changing that machinery, the practical distinction is simpler:
+release options are normal; experimental ones are opt-in; archival ones are for
+reproduction; diagnostic ones should not change functionality.
 
-- `release`: used by or compatible with the supported build path;
-- `archival`: retained to replay an older or predictive build, never enabled by
-  the normal CLI;
-- `experimental`: useful for a bounded routing or silicon campaign but not a
-  support claim;
-- `diagnostic`: prints or isolates behavior without changing release policy.
+## Normal builds
 
-The independent evidence tiers are `decoded`, `differentially_validated`,
-`statistically_silicon_validated`, and `individually_qualified`. The D0
-backfill records already-approved V4 release scope as individual qualification;
-it does not promote an experiment or widen a support claim.
+You should not normally set engine flags by hand. Use the CLI/project settings:
 
-Bit generation defaults to `AGAMEMNON_STRICT_POLICY=release-strict`, which
-fails before emission unless every emitting surface has release maturity,
-reviewed statistical or individual evidence, and conflict-free metadata.
-`experimental-strict` additionally requires a comma-separated explicit ID list
-in `AGAMEMNON_EXPERIMENTAL_FEATURES`; each admitted experiment must already be
-differentially validated or higher. It always creates a hash-bound non-release
-sidecar next to the image. `AGAMEMNON_POLICY_SIDECAR` can select that sidecar's
-path. These controls grant no promotion: current decoded-only experiments are
-still rejected.
+- `--freq` or `[fabric].freq` for fabric frequency;
+- `AGAMEMNON_SYSCLK` and `AGAMEMNON_HSE` for low-level clock selection;
+- the board/project manifest for package, PCF, carry and MCU/fabric choices.
 
-## Research-unsafe recovered-knowledge profile
+Direct one-off builds default to L48. `AGAMEMNON_DEVICE` is the lower-level
+package selector used by the project loader.
 
-`agamemnon build --research-unsafe` is a deliberately separate third policy.
-It exists for reverse engineering, routing exploration, and hardware probes
-where refusing every unqualified fact is less useful than preserving its exact
-origin and risk. It enables the broad enumerated graph, completed RMUX-to-IMUX
-crossbar, soft preferences for conducting and clean-selector edges, decoded
-mesh-template fallback, and the vendor-derived selector conflict atlas.
+The release bit generator rejects selectors and feature combinations it does
+not know how to encode safely. Known bad logical graphs and exact images are
+also blocked before output is written.
 
-The profile may emit a corpus-majority, conflicted, decoded, or predicted
-selector. It never silently calls those rows clean or independently derived.
-Every image writes a mandatory `.policy.json` sidecar binding the routed JSON,
-output, registry, `research_knowledge_manifest.json`, and counts of the actual
-selector evidence classes used by that image. Standalone routed JSON can be
-packed with `agamemnon pack --research-unsafe`.
+## `research-unsafe`
 
-The profile does **not** make incomplete configuration acceptable: an
-unresolved routed selector still stops emission. It also cannot resurrect a
-checked-in negative-evidence edge; negative evidence remains a hard
-architecture blacklist (the checked-in set is currently empty — all fourteen
-historical entries were re-qualified as conducting). Release support, package qualification, behavior, timing accuracy,
-and vendor parity are unchanged. The equivalent low-level gate is:
+`agamemnon build --research-unsafe` enables recovered information that is useful
+for reverse engineering but too ambiguous for the normal flow. Among other
+things it can use:
+
+- the broad enumerated routing graph;
+- recovered RMUX/IMUX crossbar data;
+- selector majority/context data;
+- decoded mesh-template fallbacks;
+- predicted selector values.
+
+Every research-unsafe image gets a `.policy.json` sidecar recording which kinds
+of evidence were actually used. An unresolved selector still stops the build.
+
+The equivalent low-level settings are:
 
 ```text
 AGAMEMNON_STRICT_POLICY=research-unsafe
 AGAMEMNON_RESEARCH_UNSAFE=1
 ```
 
-`agamemnon/chipdb/research_knowledge_manifest.json` inventories and hashes the
-normalized public chip database. `selector_conflict_atlas.agdb` retains all
-74,103 conflicted physical edge keys from 733,862 parsed observed keys,
-including every observed pair/count distribution. Its source hash is retained;
-the 1.7 GiB parsed vendor-derived corpus and all raw vendor artifacts remain in
-the workbench and are not shipped.
+`agamemnon/chipdb/research_knowledge_manifest.json` hashes the public recovered
+database. `selector_conflict_atlas.agdb` contains 74,103 conflicted physical
+edge keys from 733,862 parsed observed keys. The much larger raw vendor-derived
+workbench corpus is not shipped.
 
-`qualification/claim_policy_dry_run.json` applies the default policy to every
-retained A0 artifact without emitting bytes. Regenerate both policy artifacts
-with `python tools/generate_claim_policy_ledger.py --write`; CI uses `--check`.
+## Experimental-strict mode
 
-The V6 BRAM differential campaign admits 39 configuration-encoding rows in
-`agamemnon/chipdb/bram_config_admission.json`. That metadata records exact
-selector encodings; the admission itself does not claim BRAM behavior or
-silicon qualification, and it is unchanged by the 2026-08-15 measurement below.
-The existing release BRAM surface is unchanged. Separately from the admission,
-four fields now have bounded silicon observations. `PORTA_OUTREG` adds exactly
-one BRAM clock of Port-A read latency at `X13Y4` in the one exercised read mode
-(x18 Port-A read, identity ROM, 4-bit fabric address, Port-B unused, single
-clock domain), while `PACKEDMODE` and `CLKMODE` showed no observable effect in
-that same mode. `PACKEDMODE` returned a bounded null in that read-only oracle but has **measured first-order behaviour** in both write-path-shaped and dual-port oracles: one config byte (66,222) moves the former from `{0,5,A,F}` to `{0,4,8,C}` and collapses the latter from 7 distinct values to 2. **No mechanism is claimed.** `CLKMODE` remains a **bounded null** across all three compositions, not a characterization. `PORTB_OUTREG` also has measured behaviour: a one-bit patch changed the retained x2 dual-port oracle from `{0,2,4,6,8,A,C}` to `{2,4,8,E}` in three 500-sample runs; the oracle's cycle model predicts exactly those sets for zero versus one extra Port-B clocks and rejects two, so the field adds one Port-B read clock in that composition. Direct hard-output probes refute the wrapper-visible source-built write claim: INIT=1/write-`00` kept both hard outputs high and INIT=0/write-`11` kept both low, on fresh and retained routes. The `0xfffffff0`/`0xfffffff3` result is the fabric-side read-first/transparency wrapper, not storage mutation. A four-arm matrix qualifies one fixed-address registered-source x18 write A/B through `TMUX09 -> KMUX03`. Its four hash-bound profiles support retained replay and explicit `build --uarch --qualified-bram-write`: fresh synthesis/place/route is followed by collision-audited canonical trees and exact final image hashes. Edited/inferred/generic writes, WeA mechanism, general TMUX/KMUX routing, other addresses, widths/sites/modes/clocks, and collision semantics remain unqualified. Production does not bypass `emulate_read_first` globally. That measurement was a
-single-composition silicon result. The independent config-field observations
-above were single-bit differentials against qualified
-base images; they do not widen this gate's admission or emission surface. Note
-also that the
-`X13Y1`–`X13Y4` gate range below is the CONFIG surface. Exact BEL terminals and
-frame cells are now structurally mapped at all four sites. Simultaneous
-vendor-routed images read distinct bytes and exercised all 512 x18 Port-A
-addresses at all four hard arrays with zero errors on silicon. The production routing graph remains silicon-curated and exposes only
-`X13Y4`, so ordinary open-flow arbitrary-site placement is not yet claimed. The newly admitted x36 width,
-`PACKEDMODE`, `DLYTIME`, `PORTA_OUTREG`, `PORTB_OUTREG`, `PORTA_WRITETHRU`,
-`PORTB_WRITETHRU`, and `RSEN_DLY` encodings are fail-closed behind all three of
-these settings:
+Some experiments are precise enough to emit but are intentionally not part of
+the release path. They use:
 
-The scalar `AsyncReset0` BEL input and measured
-`IMUX32 -> TileAsyncMUX00` path are now represented by an exact data-driven
-route codeword. Emission clears the whole selector field and sets `{2,7}`,
-removing inherited sel 3; the reset gate parameters remain separate. This is
-route/config reproduction only. The live natural `TMUX13 -> KMUX3` matrix
-retained INIT in both pulsed directions. Two early `TMUX09`-tail attempts were
-liveness-aborted before BRAM interpretation; a later registered-source matrix
-corrected that apparatus and causally produced the four bounded write profiles.
-Their codewords and zero-bit presentation alias are profile-scoped and do not
-enter the ordinary routing graph.
+```text
+AGAMEMNON_STRICT_POLICY=experimental-strict
+AGAMEMNON_EXPERIMENTAL_FEATURES=<comma-separated feature IDs>
+```
+
+The experiment itself must also be enabled. The resulting image gets a policy
+sidecar so it cannot be confused with a normal release build.
+
+Two current examples are BRAM configuration experiments and a small set of
+routing-selector experiments.
+
+## BRAM experiments
+
+`AGAMEMNON_BRAM_EXPERIMENTAL_CONFIG` exposes a limited set of recovered BRAM
+configuration fields on AGRV2KL48 X13Y1 through X13Y4.
+
+Enable it with:
 
 ```text
 AGAMEMNON_STRICT_POLICY=experimental-strict
@@ -125,24 +92,38 @@ AGAMEMNON_EXPERIMENTAL_FEATURES=AGAMEMNON_BRAM_EXPERIMENTAL_CONFIG
 AGAMEMNON_BRAM_EXPERIMENTAL_CONFIG=1
 ```
 
-That gate is limited to the AGRV2KL48 BRAM column X13Y1 through X13Y4. Invalid
-values, other packages/sites, and `RSEN_DLY=3` are rejected rather than inferred.
-Each BRAM cell may select at most one newly experimental nonbaseline row: one
-x36 port width or one nonzero experimental field/value. Simultaneous new-field
-unions and x36 on both ports are untested compositions and fail closed. A
-multi-bit value admitted as one row, such as `DLYTIME=3`, remains one selection.
+The recovered configuration table currently includes 39 rows. Useful hardware
+observations include:
 
-Routing-wave selectors use a separate contract at
-`agamemnon/chipdb/routing_selector_admission.json`; they are never appended to
-the blanket release-qualified `sel_edge_pairs.agdb` table. The contract contains
-six individually reviewed AGRV2KL48/L48 RMUX30 rows. Each row binds one exact
-route, one exact IOTILE `CFG_RMUX3` transition, its authenticated holdout
-evidence, the two retained terminal exclusions, and its approval artifact.
-Rows can supplement only their named architecture pips and emit only their
-set/clear selector difference. An enabled experiment that uses none of the six
-routes remains byte-identical to the release path.
+- `PORTA_OUTREG` adds one Port-A read clock in the tested X13Y4 x18 case;
+- `PORTB_OUTREG` likewise behaves as one extra Port-B read clock in the tested
+  dual-port case;
+- `PACKEDMODE` changes the observed value sets in write-shaped and dual-port
+  tests, but its mechanism is not yet understood;
+- `CLKMODE` has shown no visible effect in the tested compositions;
+- the old wrapper-visible write result was not actual BRAM storage mutation;
+- one fixed-address x18 write path through `TMUX09 -> KMUX03` has four retained,
+  hash-bound working profiles.
 
-The activation boundary is deliberately three-part:
+That last case is available through the qualified BRAM-write path, but it is a
+very specific replay. General BRAM writes, arbitrary TMUX/KMUX routing, other
+addresses, widths, sites, modes and collision behavior are still open.
+
+The experimental config gate allows only one new non-baseline field/value per
+BRAM cell. Unsupported values, other packages, and untested combinations are
+rejected rather than guessed.
+
+The scalar `AsyncReset0` input and its measured `IMUX32 -> TileAsyncMUX00`
+selector are also represented explicitly. The live BRAM experiments around it
+are still research material rather than general routing support.
+
+## Routing-selector experiment
+
+`agamemnon/chipdb/routing_selector_admission.json` contains six reviewed L48
+RMUX30 selector rows. These are exact route/codeword experiments and are kept
+separate from the normal selector table.
+
+Enable them with:
 
 ```text
 AGAMEMNON_STRICT_POLICY=experimental-strict
@@ -150,61 +131,62 @@ AGAMEMNON_EXPERIMENTAL_FEATURES=AGAMEMNON_ROUTING_SELECTOR_EXPERIMENT
 AGAMEMNON_ROUTING_SELECTOR_EXPERIMENT=1
 ```
 
-Release-strict rejects the option, and either missing experimental setting
-fails closed even when the manifest contains a row. Every row must bind one
-absolute routed edge, its exact physical owner, complete set/clear selector
-surface, L48 scope, `differentially_validated` evidence, retained-negative state,
-and a reviewed source/dossier identity. The contract can admit an encoding for
-an observed LogicTILE RMUX-to-RMUX edge already present in the independently
-generated routing graph; it cannot manufacture topology. Checked-in negative-evidence (currently an empty set),
-exit-feeder, and BRAM-corridor filters retain precedence, and graph-modifying
-options are incompatible with this experiment. Same-owner and cross-owner
-encodings use the same exact owner record rather than destination-derived mux
-arithmetic. Experimental policy sidecars bind the canonical admission-manifest
-identity and ordered row identities, including the empty list in the bootstrap
-state.
+Each row identifies one physical route and the configuration bits used for that
+route. The experiment can add an encoding for an edge already present in the
+architecture graph; it cannot invent topology that is not modeled.
 
-Boolean variables preserve the historical shell convention: absence or an
-empty value means false and every non-empty value means true. In particular,
-`AGAMEMNON_FOO=0` is **true**. Use `Remove-Item Env:AGAMEMNON_FOO` in
-PowerShell or `unset AGAMEMNON_FOO` in a POSIX shell to disable one.
+## Boolean environment variables
 
-## Supported build profile
+Historical engine switches use shell-presence semantics:
 
-The CLI owns the release profile. A normal uarch build enables exact-selector,
-strict-edge, conduction, crossbar-conduction, carry, and pad capabilities as
-needed. A user should not need to set engine flags directly. The supported
-user-facing clock inputs are `--freq`/`[fabric].freq`,
-`AGAMEMNON_SYSCLK`, and `AGAMEMNON_HSE`; package, PCF, carry, and MCU-bridge
-choices are expressed by the project/board manifest and build fields. Direct
-one-off builds default to L48; `AGAMEMNON_DEVICE` is the registered lower-level
-package selector used by the project loader. Fabric frequency defaults to the
-qualified 1:1 bus-clock-to-MTIME ratio.
+```text
+unset variable  -> false
+empty variable  -> false
+any non-empty value -> true
+```
 
-`EngineOptions.digest()` provides a stable digest of the registered inputs for
-generated device-database provenance. Tests reject any `AGAMEMNON_*` switch
-used by `archgen.py` or `bitgen_seq.py` that is missing from the registry.
+This means `AGAMEMNON_FOO=0` is **true**. To disable one, remove it from the
+environment:
 
-## Silicon constants
+```powershell
+Remove-Item Env:AGAMEMNON_FOO
+```
 
-The same registry names high-impact fitted constants: LUT width, the MCU-edge
-coordinate, the clock-seam selector, left-edge output slices, BRAM Port-B OMUX
-presentations, raw/CRC sizes, CRC polynomial, and HSE input-enable bit. Each
-entry points to an in-repository qualification record, chip-database artifact,
-or format document. This does not turn inferred values into silicon claims;
-the maturity and evidence fields preserve that boundary.
+or:
 
-The large CSV/JSON/AGDB chip-database files remain the canonical bulk data.
-AGDB is a versioned, compressed JSON data container and does not execute code
-while loading. The registry is for configuration and scalar/short-tuple facts,
-not a second copy of the routing database.
+```sh
+unset AGAMEMNON_FOO
+```
+
+This convention is ugly but intentionally preserved because old campaign
+scripts depend on it.
+
+## Registry and provenance
+
+`EngineOptions.digest()` gives generated device databases a stable digest of
+the relevant registered inputs. Tests reject `AGAMEMNON_*` switches used by the
+architecture generator or bit generator if they are missing from the registry.
+
+The registry also contains a small set of important fitted constants: LUT
+width, MCU-edge coordinates, clock selectors, output slices, BRAM presentation
+values, raw/CRC sizes and the CRC polynomial. The large CSV/JSON/AGDB chip
+files remain the actual architecture database; the registry is not a duplicate
+of them.
+
+`qualification/claim_policy_dry_run.json` exercises the default policy against
+retained artifacts. Regenerate the policy files with:
+
+```sh
+python tools/generate_claim_policy_ledger.py --write
+```
+
+CI uses the same command with `--check`.
 
 ## Entry points
 
 `archgen.py` exposes `build(ctx, Loc, environ=None)`. The nextpnr-facing
-`arch.py` is a shim that calls it only when nextpnr (or the CSV emitter)
-injects `ctx` and `Loc`. `bitgen_seq.py` exposes `main(argv=None,
-environ=None)` and executes only as a program. All can therefore be imported
-by tests and maintenance tools without constructing the entire device graph,
-parsing a routed design, or writing a bitstream. Explicit environment mappings
-make isolation tests possible without mutating process state.
+`arch.py` is only a shim because nextpnr injects `ctx` and `Loc` as globals.
+
+`bitgen_seq.py` similarly delegates to the importable bit-generator code. Both
+architecture generation and bit generation accept explicit environment maps in
+tests, so experiments do not need to mutate the process environment.
