@@ -90,19 +90,19 @@ vendor flow is roughly:
   up in `af.exe`.
 
 `af.exe` is a very useful source for encodings and intended topology, but it is
-not a perfect model of the silicon. It will happily produce routes that do not
-behave as expected on the chip, and the current test campaign has found vendor
-failures and unstable vendor results as well as AGaMEMnon failures.
+not a perfect model of the silicon. It can produce designs that do not behave
+as expected on the chip, and the current test campaign has found vendor failures
+and unstable vendor results as well as AGaMEMnon failures.
 
 AGaMEMnon therefore keeps the reverse-engineered encoding data separate from
-hardware qualification. Known bad images and several known bad logical
-compositions are blocked. Unknown designs can still be wrong, so support is
-currently much narrower than "arbitrary Verilog works".
+hardware testing. Known bad images and several known bad logical compositions
+are blocked. Unknown designs can still be wrong, so support is currently much
+narrower than "arbitrary Verilog works".
 
 ## Quick start
 
 ```sh
-git clone https://github.com/bbenchoff/AGaMEMnon
+git clone https://github.com/codeandsolder/AGaMEMnon
 cd AGaMEMnon
 python3 -m pip install -e ".[programming]"
 agamemnon doctor --no-hardware
@@ -142,22 +142,23 @@ composer reports `candidate hash does not match reviewed artifact`, inspect the
 change instead of simply updating the expected hash. See
 [Landing a chip-database change](docs/LANDING_A_CHIPDB_CHANGE.md).
 
-## Hardware safety
+## Programming and recovery
 
 SWD/DAP is the simplest transport on a stock board and supports volatile
 MCU/fabric loads. The USB CDC uploader is convenient after its loader has been
-installed. The Pico-driven UART0 mask-ROM path is the flash-independent
-recovery route. Read [Programming](docs/PROGRAMMING.md) before persistent writes
-and compare your setup with [Known-good hardware](docs/KNOWN_GOOD_HARDWARE.md).
+installed. The UART0 mask ROM is independent of main flash; the checked-in Pico
+bridge implements that protocol, but the current five-wire Pico-to-L48 setup
+still needs its final target-side bench run. See
+[Programming](docs/PROGRAMMING.md) for the details.
 
 ## Documentation
 
 | Read | For |
 |---|---|
-| [Status](docs/STATUS.md) | current support, exclusions, open defects, and test state |
+| [Status](docs/STATUS.md) | current support, open defects, and test state |
 | [Vendor parity](docs/VENDOR_PARITY.md) | the 105-design campaign and its results |
 | [Installation](docs/INSTALLATION.md) | host tools, bundles, and drivers |
-| [Usage](docs/USAGE.md) | command reference and strict-build behavior |
+| [Usage](docs/USAGE.md) | command reference and build behavior |
 | [Projects](docs/PROJECTS.md) | manifests and replay templates |
 | [Programming](docs/PROGRAMMING.md) | DAP, USB, UART, and persistent writes |
 | [Examples](examples/README.md) | runnable RTL and firmware |
