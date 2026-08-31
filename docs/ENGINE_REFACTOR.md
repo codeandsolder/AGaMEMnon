@@ -1,143 +1,143 @@
-# Engine-core refactor: design and execution record
+# Engine-core refactor
 
-**Status: executed.** This refactor completed on 2026-08-06. The design
-below was implemented as written, with one extension beyond the original
-scope: the architecture-generation side was also delegated per-feature
-(`archgen.py` is a 120-line phase driver; each feature contributes its own
-wires, pips, and bels), not only the emission side. Final shape: `arch.py`
-and `bitgen_seq.py` are seven-line compatibility shims; `bitgen.py` was a
-341-line phase-driven driver at completion (2026-08-06; it has since grown
-with post-refactor feature admissions); all engine logic lives in the feature modules
-under `features/`; every chipdb file has exactly one declared owner; and
-bit-ownership write masks are enforced on every build. The migration gate
-held throughout: all retained qualified routed artifacts pack byte-identically
-through the finished engine, verified on Linux, Windows, and macOS
-(`qualification/pack_regression.json`,
-`qualification/pack_reproduction_evidence.jsonl`). The C++ nextpnr backend
-(`agrv2k.cc`) remains outside this refactor as a declared separate campaign.
+**Completed 2026-08-06.** This page is the design record for that refactor. For
+the current engine layout, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-The remainder of this document is the design as committed before execution,
-retained as the record of what was built and why. Current behavior is
-documented in [ARCHITECTURE.md](ARCHITECTURE.md). The refactor changed no
-emitted byte, no CLI surface, no evidence record, and no qualified claim.
-Byte-identity across the refactor is a migration invariant, not proof that an
-arbitrary emitted composition works on silicon; the later campaign's
-correctness escapes are tracked in [STATUS.md](STATUS.md).
+The short version: the old architecture and bitgen code had grown into two
+large files full of feature-specific special cases. The refactor moved those
+features into separate modules, made bit ownership explicit, and kept all
+retained qualified images byte-identical throughout the migration.
 
-## Why
+At completion:
 
-`agamemnon/engine/arch.py` (device-database generation, ~2,150 lines) and
-`agamemnon/engine/bitgen_seq.py` (routed JSON to raw image, ~1,340 lines, all
-logic nested inside one `main()`) jointly implement every supported feature as
-hand-threaded special cases. The two files reference roughly 75
-feature-specific chipdb CSVs by name, and most qualification commits touch
-both files. Three costs follow:
+- `arch.py` and `bitgen_seq.py` were reduced to compatibility shims;
+- architecture generation moved into `archgen.py` plus feature modules;
+- bit generation moved into a phase-driven `bitgen.py` plus feature modules;
+- each chipdb file got one declared owner;
+- features got declared writable bit ranges;
+- writes outside those ranges, or conflicting active owners, became build
+  errors;
+- retained routed qualification artifacts packed byte-identically before and
+  after the refactor on Linux, Windows and macOS.
 
-1. Cross-feature bit interference is detected empirically (the ownership
-   trace) rather than prevented structurally.
-2. Emission ordering is implicit in Python execution order.
-3. Admitting a newly qualified corridor requires code edits in shared bodies,
-   which caps admission at hand-review rate. The parity program requires
-   admission at pipeline rate: data plus claim-tier metadata, zero code.
+The C++ nextpnr backend (`agrv2k.cc`) was deliberately left out of this work.
 
-The registry half of this work is complete: `agamemnon/engine/registry.py`
-holds the typed catalog of engine options and silicon constants, each with a
-maturity tier and an evidence pointer. This document covers the remaining
-structural half.
+## Why it was needed
 
-## Target structure
+Before the refactor, `arch.py` was about 2,150 lines and `bitgen_seq.py` about
+1,340 lines. Both contained hand-threaded cases for routing, clocks, IO, BRAM,
+carry, MCU paths and other features.
+
+That caused three practical problems:
+
+1. Two features could accidentally touch the same configuration bits.
+2. Emission order depended on where code happened to sit in a large Python
+   function.
+3. Adding a newly understood route often meant editing shared engine code
+   instead of adding data to the relevant feature.
+
+The existing option/constant registry already solved part of the configuration
+problem. This refactor applied the same idea to the engine structure.
+
+## Resulting structure
 
 ```text
 agamemnon/engine/
-  registry.py          # exists: options, constants, maturity, evidence
-  chipdb_schema.py     # exists: bounded AGDB loading
-  bit_ownership.py     # exists: becomes enforcement (see below)
+  registry.py
+  chipdb_schema.py
+  bit_ownership.py
   features/
-    core_logic.py      # LUT/FF packing and slice emission
-    routing.py         # selector tables and the clean-edge gate
-    clocks.py          # spine, seam, PLL preamble profiles
-    physical_io.py     # pads, feeders, edge presentations
+    core_logic.py
+    routing.py
+    clocks.py
+    physical_io.py
     carry.py
-    bram.py            # x18/x2/x9 corridors, terminal defaults
-    mcu_ahb.py         # HRDATA/HADDR/HWDATA corridors, direct-D
-    mcu_gpio.py        # GPIO lanes, inactive-terminal policy
-    route_through.py   # identity footprints
-  archgen.py           # driver: grid + features -> nextpnr graph
-  bitgen.py            # driver: routed JSON + features -> image
-  arch.py              # nextpnr entry shim only
+    bram.py
+    mcu_ahb.py
+    mcu_gpio.py
+    route_through.py
+  archgen.py
+  bitgen.py
+  arch.py
 ```
 
-Each feature module implements one protocol. A feature declares:
+Each feature module owns its data files and contributes some combination of:
 
-- the registry options that gate it;
-- the chipdb files it owns (every CSV gains exactly one owner);
-- its architecture contribution: the wires, pips, and bels it exposes for a
-  given device and package;
-- its bitstream contribution: the bits it emits for its placed and routed
-  elements, together with the image regions it is permitted to write;
-- its emission phase;
-- the evidence records that back it, and the claim tier they support.
+- wires, PIPs and BELs to the nextpnr device model;
+- bitstream fields for placed/routed objects;
+- an emission phase;
+- the configuration bits it is allowed to write.
 
-Adding a qualified corridor then means adding chipdb rows and one entry in the
-owning feature's table — not editing shared engine bodies.
+This means many new qualified corridors can now be added as data instead of as
+more special-case code in a central function.
 
-## Required properties
+## Bit ownership
 
-**Declared bit ownership is enforced.** Each feature's writable regions are
-declared, and bitgen fails the build when a write lands outside the writer's
-prepared physical masks or two features actively claim the same bit.
-`AGAMEMNON_OWNERSHIP_TRACE` optionally records the resulting last-writer map;
-enforcement does not depend on that option. The interference class that
-produced the first constant-slave HRDATA failure is now a build error instead
-of a silicon experiment.
+Every feature declares which physical configuration bits it may write. Bitgen
+rejects a build if:
 
-**Phases are explicit.** The emission order — clear baseline, logic, routing,
-clocks, IO, MCU edges, BRAM, preamble, CRC — is named, and features slot into
-named phases. `bitgen_seq.py`'s nested-closure ordering is retired.
+- a feature writes outside its declared area; or
+- two active features try to own the same bit.
 
-**Claim tiers gate emission.** The registry's existing maturity field
-(release, experimental, archival, diagnostic) extends to the parity program's
-claim tiers. Strict bitgen refuses features below the configured tier exactly
-as it fails closed today; the tier of every emitted feature is recordable in
-evidence.
+`AGAMEMNON_OWNERSHIP_TRACE` can emit the last-writer map for inspection, but the
+checks are always active.
 
-## The nextpnr constraint
+This turns a class of bugs that previously appeared only on hardware into a
+normal build-time error.
 
-`arch.py` is executed by `nextpnr-generic` with `ctx` and `Loc` injected as
-globals; it cannot become an ordinary imported module. It therefore remains
-the entry point but shrinks to a shim that calls `archgen.build(ctx, Loc)`.
-All real logic moves into importable code that unit tests exercise offline
-against a fake `ctx`. This removes the historical hazard that the
-architecture half was unverifiable without a built toolchain.
+## Explicit phases
+
+Bitstream emission now has named phases rather than relying on Python statement
+order. Broadly, the flow is:
+
+```text
+base/default clearing
+-> logic
+-> routing
+-> clocks
+-> IO
+-> MCU boundaries
+-> BRAM
+-> preamble
+-> CRC
+```
+
+The exact current implementation may grow more phases, but the important part
+is that ordering is intentional and inspectable.
+
+## nextpnr entry point
+
+`arch.py` still exists because `nextpnr-generic` executes it with `ctx` and
+`Loc` injected as globals. It immediately calls normal importable Python code in
+`archgen.py`.
+
+That made architecture generation testable without launching nextpnr for every
+unit test.
 
 ## Migration rule
 
-The refactor proceeds as a strangler migration, one feature at a time, under
-one gate:
+The refactor used one simple invariant:
 
-> After every step, every retained qualified routed JSON must produce a
-> byte-identical image.
+> Every retained routed qualification artifact must pack to exactly the same
+> bytes after each migration step.
 
-The mechanism is the existing offline pack test extended to cover all
-retained qualification artifacts by SHA-256. Either the bytes match or the
-step is reverted. No re-qualification, silicon time, or equivalence judgment
-is involved. Steps that cannot be expressed byte-identically (there should be
-none) require explicit review rather than a relaxed gate.
+If the bytes changed, the migration step was treated as a behavior change and
+was not accepted as a refactor.
+
+The retained pack-regression records are in
+`qualification/pack_regression.json` and
+`qualification/pack_reproduction_evidence.jsonl`.
+
+This was deliberately a byte-preserving refactor. It did not try to fix broader
+routing or silicon-correctness problems at the same time.
 
 ## Out of scope
 
-- `agamemnon/engine/uarch/agrv2k/agrv2k.cc`: the C++ backend has its own
-  corridor special cases and should eventually consume feature-generated
-  tables, but it is a separate campaign after the Python side is settled.
-- Any behavior change, flag semantics change (presence semantics are load
-  bearing for campaign replay), format change, or claims change.
+- the C++ nextpnr backend;
+- CLI or environment-variable semantics;
+- bitstream-format changes;
+- support-policy changes;
+- requalification of existing designs.
 
-## Sequencing (as planned; followed)
-
-Land the in-flight HWDATA-fanout and BRAM x9 stream work in the current
-structure first; do not restructure under active workstreams. Then execute
-this refactor before the differential-fuzzing harness begins admitting
-corridors at pipeline rate. This is the order that was executed: the
-qualification sprint landed 2026-08-04/05, the refactor completed
-2026-08-06, and no differentially derived encoding had been admitted
-before the enforcement landed.
+Those were left for separate work so failures could be attributed to one thing
+at a time.
