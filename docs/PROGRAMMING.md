@@ -1,51 +1,47 @@
 # Programming the AG32
 
-AGaMEMnon has three programming paths with different recovery properties:
+AGaMEMnon currently has three programming paths:
 
-Programming success proves transport and configuration acceptance, not design
-function. A clean SRAM load or `FCB_STAT=0x000f0002` can still carry a
-composition-level correctness escape. Run new fabric images from volatile SRAM
-with an observable control before considering persistent deployment, and check
-the exact support boundary in [STATUS.md](STATUS.md).
+- **CMSIS-DAP/SWD + OpenOCD** drives the on-chip flash controller directly.
+- **UART0 mask ROM through a Raspberry Pi Pico 2** is independent of main
+  flash. The ROM protocol is understood, but the current Pico-to-L48 five-wire
+  bench setup still needs its final target-side hardware run.
+- **USB CDC uploader** is a TinyUSB application installed in main flash. It is
+  convenient once installed, but it is not a ROM recovery mechanism.
 
-- CMSIS-DAP/SWD and OpenOCD drive the on-chip flash controller directly.
-- A Raspberry Pi Pico 2 drives BOOT0, BOOT1, and NRST and streams the mask-ROM
-  protocol through AG32 UART0. This path remains available when main flash is
-  blank or corrupt.
-- A flash-resident TinyUSB CDC ACM uploader exposes the AGM loader protocol on
-  the target USB connector. This path is silicon-qualified for identify,
-  read, erase, write, verify, restore, and reset, but depends on valid main
-  flash and is not a ROM recovery mechanism.
+For new fabric work, use volatile SRAM first. It is faster to recover from and
+does not touch flash. [STATUS.md](STATUS.md) lists the currently known fabric
+failures.
 
 | Transport | Untouched stock board | Recovery capable | Hardware modification |
 |---|---|---|---|
-| DAP/SWD | Yes, with AGaMEMnon's qualified OpenOCD | Yes | No |
+| DAP/SWD | Yes, with AGaMEMnon's OpenOCD build | Yes | No |
 | USB CDC | No; uploader must first be installed | No | No |
-| UART mask ROM/Pico | ROM supports it | Yes | Current L48 board/harness requires added wiring |
+| UART mask ROM/Pico | ROM supports it | ROM mechanism yes; current Pico bench setup pending | Current L48 board/harness requires added wiring |
 
 The USB uploader is neither mask-ROM USB boot nor USB DFU class. See
 [USB_CDC_UPLOADER.md](USB_CDC_UPLOADER.md) for its source corrections, backup
-hashes, exact bench transcript, and recovery boundary.
+hashes and bench transcript.
 
-An untouched stock board cannot upload over USB: its hardware is capable, but
-the loader is absent from factory flash on the qualification unit. Install the
-loader once through SWD or UART0 ROM, then use the right-hand target USB-C
-connector for later transfers. The tested standalone loader returns to itself
-after reset. Booting an uploaded application persistently requires a separate,
-non-overlapping application layout; `0x80008000` must not be used because the
-existing compressed fabric begins at `0x80008100`.
+An untouched stock board cannot upload over USB: the loader is absent from
+factory flash on the board used for testing. Install it once through SWD or the
+UART0 ROM, then use the right-hand target USB-C connector for later transfers.
+The tested standalone loader returns to itself after reset. A persistently
+booted uploaded application needs a separate, non-overlapping layout;
+`0x80008000` must not be used because the existing compressed fabric begins at
+`0x80008100`.
 
 None of the three AGaMEMnon CLI transports uses the vendor `agrv` flash driver.
-The native USB client implements the qualified loader protocol directly in
-Python; `agrv32flash` remains useful only as an independent comparison tool.
+The USB client implements the loader protocol directly in Python;
+`agrv32flash` is kept as an independent comparison tool.
 
 For MCU binary format, linker addresses, startup requirements, and runnable
 SRAM/native-flash/USB examples, see
 [RISCV_MCU_PROGRAMMING.md](RISCV_MCU_PROGRAMMING.md).
 
-Hardware commands require an OpenOCD executable implementing AGM's
-RISC-V-over-ADIv5-DAP target option, `target create riscv -dap`. Stock upstream,
-xPack, and OSS CAD Suite binaries do not contain that extension.
+Hardware commands need an OpenOCD build with AGM's RISC-V-over-ADIv5-DAP target
+option, `target create riscv -dap`. Stock upstream, xPack, and OSS CAD Suite
+binaries do not contain that extension.
 
 ```bash
 agamemnon install-openocd
@@ -53,23 +49,19 @@ agamemnon doctor --probe-dap
 ```
 
 `AGAMEMNON_OOCD_CFG` and `AGAMEMNON_OOCD_SCRIPTS` override the packaged target
-configuration and OpenOCD script directory. `AGAMEMNON_OPENOCD` remains an
-explicit executable override.
+configuration and OpenOCD script directory. `AGAMEMNON_OPENOCD` is an explicit
+executable override.
 
-DAP operations are single-attempt. If OpenOCD cannot start, reaches its
-operation timeout, or exits nonzero during an SRAM/program session, AGaMEMnon
-returns a concise transport error. It does not retry a write and does not
-accept partial mailbox or readback output. After a failed mutation the target
-state is explicitly unknown until it is identified and restored from the
-mandatory backup.
+DAP writes are not retried. If OpenOCD fails during an SRAM/program session,
+identify the target again before doing anything else; after a failed write its
+state may be partly changed. Flash commands require a backup for recovery.
 
-The qualified build is official OpenOCD parent `a17c5f5a`, Gerrit 9590
-patchset 2 (`9aa0f976`), plus AGaMEMnon's nested ADIv5-config repair
-(`f96d840a`). The Windows artifact passed probe, halt, register and SRAM
-read/write/restore, SRAM firmware execution, full flash backup, sector
-program/readback/restore, full-device hash restoration, and reset recovery.
-The machine-readable record is
-[`evidence/openocd-windows-ag32.json`](evidence/openocd-windows-ag32.json).
+The tested OpenOCD build is official parent `a17c5f5a`, Gerrit 9590 patchset 2
+(`9aa0f976`), plus AGaMEMnon's ADIv5-config repair (`f96d840a`). The Windows
+artifact has been tested for probe, halt, register and SRAM access, SRAM
+firmware execution, full flash backup, sector program/readback/restore,
+full-device hash restoration, and reset recovery. The machine-readable record
+is [`evidence/openocd-windows-ag32.json`](evidence/openocd-windows-ag32.json).
 
 ## Commands
 
@@ -79,10 +71,10 @@ The machine-readable record is
 | `agamemnon probe --transport usb [--port PORT]` | identifies the resident CDC uploader and AG32 |
 | `agamemnon probe --transport uart [--port PORT]` | resets through Pico into ROM and identifies AG32 |
 | `agamemnon sram FW --fabric FABRIC` | loads fabric and firmware into SRAM and runs them |
-| `agamemnon fcb-restream FW IMAGE...` | validates and hash-binds a one-firmware/many-image restream plan; `--execute-sram` runs it |
-| `agamemnon hil-campaign WORKLIST --root ROOT` | validates a bounded control/candidate work list and emits its ordered, hash-bound HIL plan |
+| `agamemnon fcb-restream FW IMAGE...` | prepares a one-firmware/many-image restream plan; `--execute-sram` runs it |
+| `agamemnon hil-campaign WORKLIST --root ROOT` | prepares an ordered HIL work list |
 | `agamemnon backup FILE` | reads the complete 256-KiB main flash |
-| `agamemnon flash FILE --addr ADDR --backup FILE` | backs up full flash, erases touched sectors, programs, reads back, and verifies |
+| `agamemnon flash FILE --addr ADDR --backup FILE` | backs up flash, erases touched sectors, programs, reads back, and verifies |
 | `agamemnon backup FILE --transport usb` | reads all flash through USB CDC |
 | `agamemnon flash FILE --addr ADDR --backup FILE --transport usb` | preserves sectors and verifies through USB CDC |
 | `agamemnon go ADDR --transport usb` | launches a separately linked application |
@@ -93,8 +85,8 @@ The machine-readable record is
 | `agamemnon uart-flash FILE --addr ADDR --backup FILE [--port PORT]` | preserves sectors, writes, verifies, and resets into flash |
 | `agamemnon uart-reset [--port PORT]` | selects normal boot and resets the target |
 
-Native mask-ROM USB boot and USB DFU class are not implemented. The separate
-flash-resident CDC ACM uploader is silicon-qualified on the LQFP-48 bench.
+Native mask-ROM USB boot and USB DFU are not implemented. The separate
+flash-resident CDC uploader has been tested on the LQFP-48 board.
 
 ## Pico 2 UART programmer
 
@@ -105,8 +97,7 @@ arduino-cli compile --fqbn rp2040:rp2040:rpipico2 pico/ag32_uart_programmer
 arduino-cli upload -p COM6 --fqbn rp2040:rp2040:rpipico2 pico/ag32_uart_programmer
 ```
 
-For the qualified LQFP-48 AG32 board, add these wires to the existing Pico
-harness:
+For the LQFP-48 AG32 board, add these wires to the existing Pico harness:
 
 | Pico 2 | Direction | AG32 LQFP-48 signal | Package pin |
 |---|---:|---|---:|
@@ -121,21 +112,19 @@ Cross TX and RX as shown. Both sides are 3.3-V logic. Keep the AG32 board on
 its normal supply and the Pico on USB; **do not connect Pico VBUS or 3V3 to the
 AG32 power rail**. The Pico drives BOOT1 low only while reset is being latched,
 then releases GP27 so target firmware can use `PIN_20`. NRST is only driven low
-and otherwise is released with the Pico's weak input pull-up enabled.
+and otherwise released.
 
 The strap pins may have passive pull resistors, but they must not be hard-tied
 or actively driven by another device. Remove a hard BOOT0/BOOT1 strap before
 connecting the Pico. A 1-kohm series resistor in each Pico control lead
-(GP22/GP26/GP27) is recommended for contention protection; it is not needed to
-change the logic protocol.
+(GP22/GP26/GP27) is useful for contention protection.
 
-The qualification board's AGM DAP-Link adapter (the existing target serial
-port, COM5 on the bench) is also wired to UART0. **Disconnect or mux the
+The board's AGM DAP-Link adapter is also wired to UART0. **Disconnect or mux the
 DAP-Link TX-to-AG32-UART0_RX path before connecting Pico GP20.** Two push-pull
 TX outputs must not be connected together. DAP-Link RX may remain connected to
 AG32 UART0_TX because it is only another input. If the board has no removable
-UART jumper, open its TX solder bridge or add a 3.3-V two-input UART mux; a
-series resistor alone is not a reliable bus selector.
+UART jumper, open its TX solder bridge or add a 3.3-V UART mux; a series
+resistor alone is not a reliable bus selector.
 
 Install the host dependency and check the link:
 
@@ -146,16 +135,15 @@ agamemnon uart-probe --port COM6
 
 The AG32 ROM uses UART0 at 460800 baud, 8 data bits, no parity, and one stop
 bit. The Pico owns that target-side baud rate; the USB CDC baud selected by the
-host is immaterial. If exactly one Pico is connected, `--port` can be omitted.
+host does not matter. If exactly one Pico is connected, `--port` can be omitted.
 
-The bridge firmware and host protocol are software-tested, and the Pico on the
-qualification bench has been flashed and USB-smoke-tested. Target-side UART
-qualification requires the five signal wires above; until that is completed,
-the UART path must not be described as silicon-qualified.
+The bridge firmware and host protocol have software tests, and the Pico on the
+bench has been flashed and USB-smoke-tested. The remaining gap is the complete
+five-wire Pico-to-AG32 target-side run. In other words: the ROM mechanism is
+known, but this particular recovery setup is not yet fully hardware-tested.
 
-The complete source trail, ROM-protocol findings, current bench transcript,
-and proposed programming interposer are documented in
-[UART_BOOTLOADER.md](UART_BOOTLOADER.md).
+The source trail, ROM-protocol findings, current bench transcript, and proposed
+programming interposer are in [UART_BOOTLOADER.md](UART_BOOTLOADER.md).
 
 ## Volatile SRAM execution
 
@@ -173,18 +161,15 @@ The command places:
 
 The firmware calls `ag32_fcb_config()`, performs the test or application work,
 and stores optional observations at `0x20001000`. SRAM execution does not touch
-flash and is the preferred development and qualification path.
+flash and is the preferred development path for new fabric images.
 
-### FCB restream instrument (exact A/B/A composition silicon-qualified)
+### FCB restream instrument
 
-`qualification/fcb_restream_probe.c` is a clean-room, SRAM-resident mailbox
-loop over the same `ag32_fcb_config()` AUTO stream. It permits a host to load
-the firmware once and stage successive full images at `0x20002000`. Every
-request must carry the exact 24,986-word length and a fresh nonzero sequence;
-the sequence is published last, and the firmware publishes its result sequence
-last. Bad command, size, or address requests are refused before FCB access. A
-non-`FCB_STAT_OK` result latches a private fault until MCU reset, so later
-requests cannot silently continue configuring.
+`qualification/fcb_restream_probe.c` is an SRAM-resident mailbox loop over the
+same `ag32_fcb_config()` AUTO stream. It lets the host load the firmware once
+and stage successive full images at `0x20002000`. Requests carry the image
+length and a sequence number; malformed requests are rejected before FCB
+access. An FCB error latches until MCU reset.
 
 The command is desk-only by default:
 
@@ -192,23 +177,19 @@ The command is desk-only by default:
 agamemnon fcb-restream fcb_restream_probe.bin first.bin second.bin
 ```
 
-It verifies each image is exactly 99,944 bytes and prints a portable SHA-256
-plan with one firmware load and zero flash writes. The optional DAP execution
-path requires the explicit `--execute-sram` option, performs one
-single-attempt SRAM session, and contains no flash operation.
+It checks that each image is 99,944 bytes and prints a SHA-256 plan with one
+firmware load and no flash writes. `--execute-sram` runs the sequence through
+DAP.
 
-One exact live sequence is silicon-qualified on L48: the retained constant AHB
-endpoint (`0x4147414d`), the same routed image with only its shared HRDATA-one
-LUT changed to constant zero (`0x00000000`), then the retained endpoint again.
-All three configurations returned exact `FCB_STAT_OK`; the firmware success
-counter advanced 1, 2, 3 with zero rejects; direct AHB reads were A/B/A; the
-board was reset and no flash/POR/options/rewiring operation occurred. See
-`qualification/fcb_restream_evidence.jsonl`.
+One A/B/A sequence has been tested on L48: the retained constant AHB endpoint
+(`0x4147414d`), the same routed image with its shared HRDATA-one LUT changed to
+constant zero (`0x00000000`), then the retained endpoint again. All three
+configurations returned `FCB_STAT_OK`; direct AHB reads were A/B/A and the board
+was reset afterwards. See `qualification/fcb_restream_evidence.jsonl`.
 
-That is a deliberately narrow composition, not generic hot reconfiguration.
-Arbitrary images, state migration, timing continuity, unsafe outputs,
-persistent deployment, other devices/packages, and unattended HIL remain
-unqualified. FCB acceptance alone still is not a DUT-function verdict.
+This demonstrates repeated configuration of that setup. It does not yet cover
+arbitrary hot reconfiguration, state migration, continuity-sensitive outputs,
+or unattended use.
 
 ## Main-flash programming
 
@@ -221,32 +202,29 @@ agamemnon flash payload.bin --addr 0x80020000 --backup full-flash.bin
 
 Main flash occupies `0x80000000..0x8003ffff`. `flash` erases every 4-KiB sector
 spanned by the payload, programs through the controller at `0x40001000`, reads
-the region back into a unique fresh temporary file, requires a successful dump
-with the exact expected length, and compares it byte-for-byte. A dump failure,
-truncation, or byte mismatch exits nonzero.
-Before any DAP, USB, or mask-ROM UART mutation or execute command, the host
-performs a separate identity read and requires device ID `0x40200001`.
+the region back, and compares it byte-for-byte. A readback failure, truncation,
+or mismatch exits nonzero. Before a DAP, USB, or UART mutation/execute command,
+the host also reads the device ID and requires `0x40200001`.
 
 Option bytes occupy a separate region at `0x81000000` and are not modified by
 `flash`.
 
-The UART equivalent makes the backup mandatory and preserves complete touched
-sectors automatically:
+The UART equivalent also requires a backup and preserves complete touched
+sectors:
 
 ```bash
 agamemnon uart-flash payload.bin --addr 0x80020000 \
   --backup pre-uart-write.bin --port COM6
 ```
 
-It first reads and fsyncs the entire main flash to the backup file, overlays the
-payload on the saved sector images, erases only the touched 4-KiB pages, writes
-those complete pages, and compares their complete readback. Only after a clean
-comparison does it lower BOOT0 and reset into flash. A failed write leaves
-BOOT0 high in serial-ROM recovery.
+It reads the whole main flash to the backup file, overlays the payload on the
+saved sector images, erases only touched 4-KiB pages, writes those pages, and
+compares the complete readback. After a clean comparison it lowers BOOT0 and
+resets into flash. A failed write leaves BOOT0 high in serial-ROM recovery.
 
 ## Existing compressed boot layout
 
-On the qualified board, option bytes select a compressed fabric image at
+On the tested board, option bytes select a compressed fabric image at
 `0x80008100` and a decompressor at `0x80007000`. Replace the image without
 changing the option pointers:
 
@@ -255,9 +233,9 @@ agamemnon backup full-flash.bin
 agamemnon flash design.bin.comp --addr 0x80008100 --backup full-flash.bin
 ```
 
-The decompressor and fabric image can share a 4-KiB erase sector. Preserve and
-restore the complete affected sector; erasing only the visible image fragment
-can destroy part of the decompressor.
+The decompressor and fabric image can share a 4-KiB erase sector. Preserve the
+whole affected sector; erasing only the visible image fragment can destroy part
+of the decompressor.
 
 Fabric configuration from flash occurs on power-on. A debugger warm reset does
 not rerun the complete fabric boot sequence.
@@ -272,23 +250,22 @@ agamemnon image --fabric design.bin --mcu firmware.bin \
 
 Without `--flash`, `image` prints a write plan. With `--flash`, it writes the
 MCU and uncompressed fabric regions through the same verified main-flash path.
-Those writes do not change the boot ROM's fabric pointer. `--flash` always
-requires a complete `--backup`; the capture is size-checked and atomically
-published before any erase begins.
+Those writes do not change the boot ROM's fabric pointer. `--flash` requires a
+complete `--backup` before erase begins.
 
 `--write-options` also attempts to write the uncompressed-config pointer at
-`0x81000030`. This operation is not a supported deployment path. It requires
-an explicit flag, `--flash`, the main-flash backup, and a distinct
-`--option-backup` containing all 128 option bytes. It must not be used to claim
-a bootable layout.
+`0x81000030`. This is experimental. It requires an explicit flag, `--flash`,
+the main-flash backup, and a separate `--option-backup` containing all 128
+option bytes. Do not use it as the normal boot-layout path.
 
 ## Recovery
 
 - Keep the complete 256-KiB backup off-board.
 - Restore it with
   `agamemnon flash full-flash.bin --addr 0x80000000 --backup pre-restore.bin`.
-- The SWD debug path is independent of main-flash contents.
-- With the Pico adapter, restore over the flash-independent ROM path with
+- SWD works independently of main-flash contents.
+- Once the Pico UART setup is fully bench-tested, the ROM path is intended to
+  provide the same flash-independent recovery with
   `agamemnon uart-flash full-flash.bin --addr 0x80000000 --backup pre-restore.bin`.
 - `uart-reset` drives BOOT0 low and pulses NRST without writing flash.
 
