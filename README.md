@@ -42,29 +42,28 @@ or a memory-mapped coprocessor beside the MCU. The
 [AG32 overview](docs/AG32_OVERVIEW.md) explains the device, naming, clocks,
 boot paths, packages, and documentation landscape.
 
-The vendor architecture makes the fabric configurable glue between many hard
-peripheral signals and package pads. In principle that permits flexible UART
-placement, state machines in signal paths, memory-mapped custom peripherals,
-and runtime muxing. Think of the AG32 as something like the Raspberry Pi Pico,
-with even better PIOs, or something like the Cypress PSoC, but not limited to
-vendor-designed peripherals.
+In principle the fabric gives you flexible UART placement, state machines in
+signal paths, memory-mapped custom peripherals, runtime muxing, and other FPGA
+tricks around a normal MCU. Think of the AG32 as something between a Raspberry
+Pi Pico with much more flexible PIO and a PSoC whose programmable blocks are an
+actual FPGA fabric.
 
-The AG32 has almost no English-language documentation. The 'normal' way to
-build a bitstream is a Windows-only Altera Quartus II fork you fetch from a
-Baidu Netdisk link (password `12ej`), driving a black-box fabric back-end,
-`af.exe`. There is no Linux path and no open format. Fuck you if you want to
-use this chip as intended.
+The AG32 has almost no English-language documentation. The normal vendor FPGA
+flow is a Windows-heavy Altera Quartus II fork plus a black-box backend called
+`af.exe`, distributed through a Baidu Netdisk link. There is no documented open
+bitstream format and the useful architecture data lives inside vendor tools.
 
-*AGaMEMnon* takes Verilog and produces a flashable AG32 fabric bitstream
-— synthesis, pack, place, route, bitstream generation, and programming, with no
-vendor binary in the path. It's an SDK for the RISC-V half of this chip. This is
-an open toolchain for a weird combination RISC-V microcontroller and FPGA.
+*AGaMEMnon* takes Verilog and produces a flashable AG32 fabric bitstream —
+synthesis, pack, place, route, bitstream generation, and programming, with no
+vendor binary in the path. It also includes an SDK for the RISC-V side.
 
-This is [IceStorm](https://github.com/YosysHQ/icestorm) for a chip nobody has
-heard of. Verilog synthesizes, places, routes, and runs on real silicon:
-combinational and sequential logic, counters and state machines, clocking
-across the array, output to real pins, and the RISC-V core reading and writing
-the fabric over its memory bus. There's a writeup of how it works
+This is roughly IceStorm for a chip almost nobody has heard of. Verilog can be
+synthesized, placed, routed, loaded on real silicon, and connected to the MCU.
+Some things work, many still do not, and a few designs appear to fail even when
+built with the original vendor backend. The current state is documented in
+[STATUS.md](docs/STATUS.md).
+
+There's a writeup of the reverse engineering
 [here](http://bbenchoff.com/pages/AGaMEMnon.html).
 
 Watch the video demo:
@@ -74,19 +73,31 @@ Watch the video demo:
 [video-thumbnail]: https://img.youtube.com/vi/udDq3NHxerc/maxresdefault.jpg
 [video-demo]: https://www.youtube.com/watch?v=udDq3NHxerc
 
-## What This Reverse-Engineering Project _Is_
+## What this project is
 
-The purpose of this repo is to build an open-source alternative to the AG32 vendor toolchain. This vendor toolchain is based on Yosys, Quartus, and the `af.exe` application. The vendor toolchain works something like this:
+The goal is an open replacement for the AG32 programmable-logic toolchain. The
+vendor flow is roughly:
 
-* *Yosys* -- The vendor toolchain ships a modified version of Yosys. This is used to generate the synthesis. With this, Yosys maps Verilog to cells and eventually ALTA primatives. This project RE'd the vendor copy of Yosys to determine the cell/primative library - LUTs/BRAM/carry/IO definitions - and basically copied it. The embedded copy of Yosys does not do placement or routing.
-* *`af.exe`* -- The fabric back-end. It does the pack, place, route, bitstream generation, and flash-file output. It's a Windows binary, carrying an embedded Tcl interpreter and the architecture database (routing/mux topology, clock/PLL, config-chain bit maps) wrapped in a reversible substitution cipher this project recovered. `af.exe` has no model of which wires actually conduct on silicon and will route an electrically dead edge without hesitation. The bitstream encoding, the routing selectors, and the config-bit maps live here and nowhere else. Recovering `af.exe` is the bulk of this project, involving Ghidra, differential builds against the vendor output, and silicon replication of what _should_ happen.
-* *Quartus* -- The vendor toolchain ships with Quartus and `Supra.exe`, tools that handle a migration from Altera MAX II/Cyclone parts over to the AG32 and other AGM FPGAs/CPLDs. Quartus doens't actually do anything relating to packing, placing, or routing. That's all done through `af.exe`.
+* **Yosys** — a modified copy maps Verilog to the vendor primitive library.
+  AGaMEMnon recovered the LUT, BRAM, carry and IO cell definitions from that
+  flow. The vendor Yosys does not place or route.
+* **`af.exe`** — the actual FPGA backend. It packs, places, routes and emits the
+  bitstream. It also contains the architecture database: routing topology,
+  mux encodings, clock/PLL data and configuration-bit maps. Recovering this is
+  most of the reverse-engineering work.
+* **Quartus / `Supra.exe`** — mostly the surrounding migration/frontend tools
+  for AGM's Altera-like FPGA families. Packing, placement and routing still end
+  up in `af.exe`.
 
-This project is not really about reverse-engineering an FPGA. This is a project for reverse-engineering the `af.exe` tool that ships with the vendor toolchain, then porting that to nextpnr. `af.exe` is a conduction-blind router, and it has no model of what wires on the silicon actually conduct. The only way to actually figure out how this chip works is through running Verilog through `af.exe`. This was easy, and can be easily solved by having an LLM take a crack at it. The result is a full route routing grid, the map of what the fabric of the chip _should_ look like.
+`af.exe` is a very useful source for encodings and intended topology, but it is
+not a perfect model of the silicon. It will happily produce routes that do not
+behave as expected on the chip, and the current test campaign has found vendor
+failures and unstable vendor results as well as AGaMEMnon failures.
 
-However, `af.exe` is only the ground truth for the encodings. It does not provide any information on conduction, and doesn't know what works on silicon. The actual focus of AGaMEMnon is figuring out what works, and porting that to nextpnr. Most of this repo is figuring that out, and because a bitstream that doesn't map to conduction in the fabric only fails silently, we need rules. This entire project aims to make a silently-wrong bitstream impossible.
-
-You may have noticed that the vendor toolchain, `af.exe` is blind to conduction when creating bitstreams. This implies the vendor toolchain can emit bitstreams that don't do what they're supposed to. Either they fail silently, or they're just _wrong_. This has been witnessed when feeding verilog to `af.exe`. The output of this project will never emit a bitstream that will fail on real silicon.
+AGaMEMnon therefore keeps the reverse-engineered encoding data separate from
+hardware qualification. Known bad images and several known bad logical
+compositions are blocked. Unknown designs can still be wrong, so support is
+currently much narrower than "arbitrary Verilog works".
 
 ## Quick start
 
@@ -118,52 +129,52 @@ This default needs only a compatible RISC-V GCC and runs from volatile SRAM.
 `agamemnon doctor` reports separate inspection, MCU-build, fabric-build, and
 hardware-transport capabilities.
 
-Two larger templates are exact replays, not generic promises:
+Two larger templates replay known working designs rather than promising a
+generic implementation:
 
 - `--template mcu-fpga` replays the reviewed L48 public32 AHB map: ID32
   `0x4147414d` at +0, scratch16 at +4, counter3 at +8, and W1C1 at +c.
 - `--template serv-blinky` replays one retained L48 SERV route. Fresh arbitrary
-  SERV placement, a fresh full parity claim, and wider direct-D placement are
-  outside this profile.
+  SERV placement and wider direct-D placement are not supported yet.
 
-The current checkout intentionally has a review gate on the public32
-composition. If the composer reports `candidate hash does not match reviewed
-artifact`, stop and review the semantic drift; do not repin the hash to make the
-test green. See [Landing a chip-database change](docs/LANDING_A_CHIPDB_CHANGE.md).
+The current checkout has a review gate on the public32 composition. If the
+composer reports `candidate hash does not match reviewed artifact`, inspect the
+change instead of simply updating the expected hash. See
+[Landing a chip-database change](docs/LANDING_A_CHIPDB_CHANGE.md).
 
 ## Hardware safety
 
-SWD/DAP is the beginner-safe transport: it works on a stock board and supports
-volatile MCU/fabric loads. The USB CDC uploader is convenient only after its
-loader is installed. The Pico-driven UART0 mask-ROM path is the
-flash-independent recovery route. Read [Programming](docs/PROGRAMMING.md) before
-any persistent write and compare the setup with
-[Known-good hardware](docs/KNOWN_GOOD_HARDWARE.md).
+SWD/DAP is the simplest transport on a stock board and supports volatile
+MCU/fabric loads. The USB CDC uploader is convenient after its loader has been
+installed. The Pico-driven UART0 mask-ROM path is the flash-independent
+recovery route. Read [Programming](docs/PROGRAMMING.md) before persistent writes
+and compare your setup with [Known-good hardware](docs/KNOWN_GOOD_HARDWARE.md).
 
 ## Documentation
 
 | Read | For |
 |---|---|
-| [Status](docs/STATUS.md) | authoritative support, exclusions, open defects, and current test state |
-| [Vendor parity](docs/VENDOR_PARITY.md) | the 105-design campaign and its evidence limits |
+| [Status](docs/STATUS.md) | current support, exclusions, open defects, and test state |
+| [Vendor parity](docs/VENDOR_PARITY.md) | the 105-design campaign and its results |
 | [Installation](docs/INSTALLATION.md) | host tools, bundles, and drivers |
 | [Usage](docs/USAGE.md) | command reference and strict-build behavior |
-| [Projects](docs/PROJECTS.md) | manifests and exact replay templates |
-| [Programming](docs/PROGRAMMING.md) | DAP, USB, UART, and persistent-write safety |
-| [Examples](examples/README.md) | runnable RTL and firmware with per-example scope |
-| [MCU SDK](sdk/README.md) | open HAL coverage and qualification tiers |
-| [MCU HAL reference](docs/HAL_MCU_REFERENCE.md) | MCU registers, drivers, and provenance |
+| [Projects](docs/PROJECTS.md) | manifests and replay templates |
+| [Programming](docs/PROGRAMMING.md) | DAP, USB, UART, and persistent writes |
+| [Examples](examples/README.md) | runnable RTL and firmware |
+| [MCU SDK](sdk/README.md) | open HAL coverage |
+| [MCU HAL reference](docs/HAL_MCU_REFERENCE.md) | MCU registers and drivers |
 | [FPGA HAL reference](docs/HAL_FPGA_REFERENCE.md) | fabric resources and configuration fields |
-| [Architecture](docs/ARCHITECTURE.md) | synthesis, routing, bitgen, and verification layers |
-| [Routing admission](docs/ROUTING_ADMISSION.md) | selector policy and what admission does not prove |
-| [MCU/fabric boundary](docs/MCU_AHB_REGISTER_BANK.md) | exact AHB compositions and remaining gaps |
-| [Hardware validation](docs/HARDWARE_VALIDATION.md) | board-observed evidence, including negative results |
-| [Roadmap](ROADMAP.md) | prioritized correctness, breadth, and release work |
+| [Architecture](docs/ARCHITECTURE.md) | synthesis, routing, bitgen, and verification |
+| [Routing admission](docs/ROUTING_ADMISSION.md) | which routing edges are allowed and why |
+| [MCU/fabric boundary](docs/MCU_AHB_REGISTER_BANK.md) | AHB compositions and remaining gaps |
+| [Hardware validation](docs/HARDWARE_VALIDATION.md) | board-observed results, including failures |
+| [Roadmap](ROADMAP.md) | unfinished work |
+| [Documentation issues](docs/DOCUMENTATION_ISSUES.md) | contradictions and prose that needs reconciliation |
 | [Notices](NOTICE.md) | licensing and recovered-data provenance |
 
 The detailed [documentation index](docs/AG32_OVERVIEW.md#documentation-map)
-links the remaining bitstream, clock, pin-routing, peripheral, qualification,
-and research records.
+links the remaining bitstream, clock, pin-routing, peripheral and research
+records.
 
 ## Contributing and support
 
