@@ -2,17 +2,12 @@
 
 Last updated: 2026-08-24
 
-This table records combinations actually used by AGaMEMnon. “Known good” does
-not broaden the feature-level claims in [STATUS.md](STATUS.md).
-
-The qualification bench also produced real negative results during the latest
-campaign. “Known good hardware” means the fixture/identity is trusted; it does
-not turn a failing target observation into an apparatus failure or qualify an
-untested design.
+This page records the board, probes and wiring used for most AGaMEMnon hardware
+work. Feature support still lives in [STATUS.md](STATUS.md).
 
 ## Reference board
 
-| Field | Qualified value |
+| Field | Value |
 |---|---|
 | Board | AGM AG32VF303 LQFP-48 development board |
 | MCU marking | `AG32VF303CCT6` |
@@ -21,74 +16,75 @@ untested design.
 | RISC-V `misa` | `0x40801125` (`RV32IMAFC`) |
 | Main flash | 256 KiB |
 | SRAM | 128 KiB |
-| Qualified HSE | 8 MHz |
-| Board revision | Not identified on the qualification fixture |
+| HSE used in most tests | 8 MHz |
+| Board revision | Not identified on the current fixture |
 
-If a board carries another marking or package, report it as a new hardware
-target rather than selecting this board definition by visual similarity.
+If your chip marking or package differs, treat it as a different target rather
+than assuming the same board profile applies.
 
-## Transports
+## Programming/debug transports
 
-| Transport combination | State | Boundary |
-|---|---|---|
-| AGM CMSIS-DAP + AGaMEMnon qualified OpenOCD | Silicon-qualified | Install with `agamemnon install-openocd`; probe, volatile MCU/fabric SRAM load, complete flash backup, sector program, and readback passed |
-| Target USB + flash-resident uploader 2.1 (`cafe:4001`) | Silicon-qualified | Identify, read, page erase, write, verify, `GO`, and reset; not factory-installed and not recovery |
-| Raspberry Pi Pico 2 USB bridge firmware | Host/Pico tested | Pico protocol and USB enumeration tested; target UART link awaits the documented five-wire addition |
+| Transport | Current state |
+|---|---|
+| AGM CMSIS-DAP + AGaMEMnon OpenOCD | Used successfully for probe, SRAM MCU/fabric loads, full flash backup, sector programming and readback |
+| Target USB + uploader 2.1 (`cafe:4001`) | Used successfully for identify/read/erase/write/verify/GO/reset; uploader must be installed first |
+| Raspberry Pi Pico 2 UART bridge | Bridge firmware/USB side tested; target UART recovery wiring still needs the documented five-wire addition |
 
-Stock upstream and OSS CAD Suite OpenOCD are not known-good substitutes for
-the DAP row because they lack AGM's target extension. Verify the installed
-release and connected target with `agamemnon doctor --probe-dap`.
+Stock OpenOCD does not have AGM's `riscv -dap` target extension. Install the
+paired build with:
 
-## Qualification fixture wiring
+```text
+agamemnon install-openocd
+agamemnon doctor --probe-dap
+```
+
+## Pico qualification harness
 
 | AG32 L48 pin | Pico pin | Use |
 |---|---|---|
-| `PIN_25` | GP12 | Fabric output observation; input stimulus; OE corridor |
-| `PIN_26` | GP13 | Fabric output observation; OE corridor |
-| `PIN_27` | GP16 | Fabric output observation; OE corridor |
-| `PIN_28` | GP17 | Fabric output observation; OE corridor |
-| `PIN_10` | GP4 | Top-edge pad observation; UART0 TX capture; stepped OE control |
-| `PIN_11` | GP1 | Top-edge pad observation; I2C0 SDA (RP2350 slave oracle) |
-| `PIN_12` | GP0 | Top-edge pad observation; fabric input stimulus; SPI0 SCK |
-| `PIN_13` | GP3 | Top-edge pad observation; SPI0 CSN |
-| `PIN_14` | GP5 | Top-edge pad observation; SPI0 MOSI |
-| `PIN_15` | GP2 | Top-edge pad observation; I2C0 SCL (RP2350 slave oracle) |
-| `PIN_16` | GP6 | Top-edge pad observation |
-| `PIN_17` | GP7 | Top-edge pad observation; SPI0 IO1 (RP2350 PIO slave oracle) |
-| `PIN_18` | GP8 | Top-edge pad observation; undriven negative control |
-| `PIN_19` | GP9 | Top-edge pad observation; registered input |
+| `PIN_25` | GP12 | output/input/OE tests |
+| `PIN_26` | GP13 | output/OE tests |
+| `PIN_27` | GP16 | output/OE tests |
+| `PIN_28` | GP17 | output/OE tests |
+| `PIN_10` | GP4 | top-edge output, UART TX capture, OE control |
+| `PIN_11` | GP1 | top-edge output, I²C SDA |
+| `PIN_12` | GP0 | top-edge output, input stimulus, SPI SCK |
+| `PIN_13` | GP3 | top-edge output, SPI CSN |
+| `PIN_14` | GP5 | top-edge output, SPI MOSI |
+| `PIN_15` | GP2 | top-edge output, I²C SCL |
+| `PIN_16` | GP6 | top-edge output |
+| `PIN_17` | GP7 | top-edge output, SPI IO1 |
+| `PIN_18` | GP8 | top-edge output / undriven control |
+| `PIN_19` | GP9 | top-edge output / registered input |
 
-The complete current 17-pad harness map, including the remaining GP/lead
-assignments and its provenance, is in
-[HAL_FPGA_REFERENCE.md](HAL_FPGA_REFERENCE.md). The UART0 full-duplex and
-line-mode qualifications use the DAP CDC serial endpoint on `PIN_30`/`PIN_31`
-rather than this Pico harness; the I2C0/SPI0 qualifications use checked-in
-RP2350 slave oracles under `qualification/`.
+The full current harness map is in
+[HAL_FPGA_REFERENCE.md](HAL_FPGA_REFERENCE.md).
 
-The separate UART recovery modification is defined in
-[UART_BOOTLOADER.md](UART_BOOTLOADER.md). Do not infer it from this
-qualification harness.
+UART0 full-duplex tests on `PIN_30`/`PIN_31` use the board's DAP serial path
+rather than this Pico harness. I²C/SPI tests use the checked-in RP2350 slave
+oracles under `qualification/`.
 
-## Host/tool pins
+The UART mask-ROM recovery wiring is a separate modification documented in
+[UART_BOOTLOADER.md](UART_BOOTLOADER.md).
 
-The intended reproducible tool versions are stored in
-[`tools/bundle/manifest.json`](../tools/bundle/manifest.json), including OSS
-CAD Suite date, nextpnr commit, RISC-V toolchain commit, and external
-PlatformIO framework commits.
+## Tool versions
 
-AGaMEMnon OpenOCD patched commit `f96d840a` is the redistributable known-good
-build. Its official parent, Gerrit patchset, repair patch, submodules, build
-packages, and hashes are pinned in `tools/openocd/manifest.json`; release
-archives carry the full GPL source and SPDX SBOM. Complete on-device results
-exist for
-[`Windows`](evidence/openocd-windows-ag32.json) and
-[`macOS Apple Silicon`](evidence/openocd-macos-ag32.json). Linux and macOS
-Intel are independently built and parser-tested, but do not inherit those
-hosts' physical USB/hardware results.
+Pinned tool versions are recorded in
+[`tools/bundle/manifest.json`](../tools/bundle/manifest.json).
 
-## Adding a combination
+The AGaMEMnon OpenOCD build is based around patched commit `f96d840a`; exact
+sources, patches and hashes are in `tools/openocd/manifest.json`.
 
-Use the hardware-qualification issue form and include the device marking,
-board revision, transport, wiring, host OS, tool versions, source/artifact
-hashes, observable oracle, and restoration result. Accepted qualification data
-belongs in the append-only records under `qualification/`.
+Full on-device OpenOCD records exist for Windows and Apple Silicon macOS:
+
+- [`evidence/openocd-windows-ag32.json`](evidence/openocd-windows-ag32.json)
+- [`evidence/openocd-macos-ag32.json`](evidence/openocd-macos-ag32.json)
+
+Linux and Intel macOS builds are produced and tested in CI, but do not currently
+have separate host-specific hardware runs recorded here.
+
+## Adding another board or setup
+
+Include the chip marking, board revision, probe/transport, wiring, host OS,
+tool versions, source/artifact hashes and the observed result. Hardware records
+belong under `qualification/` when an existing schema fits.
