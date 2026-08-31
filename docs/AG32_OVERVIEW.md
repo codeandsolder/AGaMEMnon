@@ -18,33 +18,13 @@ results.
 ```mermaid
 flowchart LR
     FW["RISC-V firmware"] --> MCU["RV32IMAFC MCU"]
-
     MCU <--> AHB["AHB matrix"]
-
-    AHB <--> AHBP["AHB peripherals<br/>USB OTG · CRC · RCU · flash · SRAM"]
-    AHB <--> APB["AHB-to-APB bridge"]
-    APB <--> HARD["Hard peripherals<br/>UART · SPI · I²C · CAN · timers · RTC<br/>watchdogs · ADC · DAC · comparator · GPIO"]
-
+    AHB <--> HARD["Hard peripherals<br/>UART · SPI · I²C · CAN · timers · USB · analog"]
     RTL["Your Verilog"] --> FLOW["Yosys → nextpnr → AGaMEMnon bitgen"]
     FLOW --> FABRIC["AGRV2K FPGA fabric<br/>LUTs · FFs · BRAM · routing"]
-
-    AHB <--> PORTS["FPGA AHB<br/>slave + master ports"]
-    PORTS <--> FABRIC
-
+    AHB <--> FABRIC
     HARD <--> PINS["Package pins"]
     FABRIC <--> PINS
-
-    classDef firmware fill:#2563eb,stroke:#1e40af,color:#fff
-    classDef mcu fill:#0f766e,stroke:#115e59,color:#fff
-    classDef fabric fill:#7c3aed,stroke:#5b21b6,color:#fff
-    classDef tools fill:#c2410c,stroke:#9a3412,color:#fff
-    classDef physical fill:#475569,stroke:#334155,color:#fff
-
-    class FW firmware
-    class MCU,AHB,AHBP,APB,HARD mcu
-    class RTL,FLOW tools
-    class PORTS,FABRIC fabric
-    class PINS physical
 ```
 
 The fabric is a real FPGA, not a software-configurable GPIO matrix. It has
@@ -54,56 +34,46 @@ soft CPUs.
 
 ## Names you will encounter
 
-| Name | Meaning in this repository |
+| Name | Meaning |
 |---|---|
-| AG32 | AGM's MCU-plus-programmable-logic product family |
-| AG32VF303CCT6 | The LQFP-48 part used for most development and testing |
-| AGRV2K | The programmable-logic architecture/device family name used by vendor files and AGaMEMnon |
-| AGRV2KL48 | The LQFP-48 fabric target used for physical pin routing and current hardware testing |
-| AGaMEMnon | The open SDK, FPGA flow, programmer and documentation in this repository |
+| AG32 | AGM's MCU + programmable-logic family |
+| AG32VF303CCT6 | LQFP-48 part used for most development/testing |
+| AGRV2K | FPGA architecture/device family name used by vendor files |
+| AGRV2KL48 | LQFP-48 fabric/package target |
+| AGaMEMnon | This open SDK, FPGA flow and programmer |
 
-`L48`, `L64`, `L100`, and `Q32` are package variants, QFN-32 to LQFP-100.
-AGaMEMnon has recovered bond maps for all four. L48 is the package that has been
-cross-checked and tested on hardware. The exact current behavior of pad-free
-non-L48 image builds is inconsistent between existing docs and is tracked in
-[Documentation issues](DOCUMENTATION_ISSUES.md); do not rely on it until that is
-resolved.
+`L48`, `L64`, `L100` and `Q32` are package variants. Bond maps have been
+recovered for all four. The shared fabric means pad-free, fabric-logic-only
+strict builds are allowed across the family, but physical IO support is still
+L48-only in the normal strict flow. Other packages need their own board testing
+before their pads/OE/electrical behavior can be treated like L48.
 
-## Current reference hardware
+## Reference hardware
 
 Most hardware work uses the **AG32VF303CCT6 LQFP-48 development board** with
-`AGRV2KL48` fabric. The checked-in board definition records:
+`AGRV2KL48` fabric:
 
-- 256 KiB main flash and 128 KiB SRAM;
-- an 8 MHz HSE input used by the tested fabric PLL configurations;
-- four MCU-visible board LEDs on the vendor-default `GPIO4[1:4]` routes;
-- four tested fabric LED pads on package pins 25 through 28;
-- DAP, flash-resident USB CDC, and mask-ROM UART transport information.
+- 256 KiB main flash;
+- 128 KiB SRAM;
+- 8 MHz HSE used in the tested PLL configurations;
+- four MCU-visible board LEDs;
+- a Pico-connected IO qualification harness;
+- CMSIS-DAP, flash-resident USB CDC and UART ROM programming paths.
 
-The official board page also describes a 50 MHz active FPGA oscillator, an
-8 MHz MCU crystal, RTC clocking, buttons, LEDs, flash, USB, and expansion
-headers.
+See [Known-good hardware](KNOWN_GOOD_HARDWARE.md) for the exact setup.
 
-See the machine-readable
-[board definition](../agamemnon/sdk/boards/ag32vf303-l48.toml) and the
-[hardware validation setup](HARDWARE_VALIDATION.md).
-
-## What the open flow can do
-
-AGaMEMnon's FPGA path is:
+## What the open flow looks like
 
 ```text
 Verilog
   -> Yosys technology mapping
   -> nextpnr AGRV2K pack/place/route
   -> AGaMEMnon bit generation
-  -> volatile SRAM image or compressed flash image
+  -> SRAM image + compressed flash image
 ```
 
 The MCU side provides startup code, linker scripts, register headers, an open
-HAL in progress, project templates, and RISC-V GCC builds. A project can contain
-MCU sources and multiple Verilog sources with an explicit top module, PCF,
-clocks, linker, board, outputs, and flash layout.
+HAL in progress, project templates and RISC-V GCC builds.
 
 Useful starting points:
 
@@ -112,88 +82,82 @@ Useful starting points:
 | Learn the MCU | `agamemnon new hello --template mcu-blink` |
 | Learn the fabric | `agamemnon new hello --template fpga-io` |
 | Connect MCU firmware to custom logic | `agamemnon new hello --template mcu-fpga` |
-| Build the tested constant AHB endpoint | `examples/designs/mcu_ahb_constant_slave.v` |
-| Route or create serial logic | `agamemnon new hello --template uart` or `examples/serial_mux/` |
-| See tested peripheral examples | [Peripheral examples](PERIPHERAL_EXAMPLES.md) |
-| Route MCU peripherals to pins | [MCU pin routing](MCU_PIN_ROUTING.md) |
-| Understand the recovered FPGA | [Architecture](ARCHITECTURE.md) |
+| See peripheral examples | [Peripheral examples](PERIPHERAL_EXAMPLES.md) |
+| Understand pin routing | [MCU pin routing](MCU_PIN_ROUTING.md) |
+| Understand the FPGA backend | [Architecture](ARCHITECTURE.md) |
 
-The MCU/fabric AHB path works for several specific examples: a 32-bit constant
-endpoint, two address inputs, four directly placed registers, a counter, an
-LFSR, and one reviewed register-bank composition with ID, scratch, counter and
-W1C fields. Wider and more general register banks are still unfinished. The
-bus clock tracks MTIME one-for-one in the tested setup, but its absolute source
-and rate are still being investigated after MTIME measured 14.08 MHz rather
-than the previously assumed 10 MHz. See [MCU clocks](MCU_CLOCKS.md) and
-[MCU External AHB](MCU_AHB_REGISTER_BANK.md) for the details.
+## MCU/fabric interface
 
-## Boot and programming paths
+The external AHB path works for several retained examples, including a 32-bit
+constant endpoint, small state machines and one reviewed four-word register
+bank. Wider/general register banks are still unfinished.
 
-| Transport | Works on untouched board | Recovery when main flash is bad | Extra hardware |
-|---|---|---|---|
-| SWD/DAP | Yes, with AGaMEMnon's OpenOCD build | Yes | CMSIS-DAP probe |
-| Flash-resident USB CDC uploader | No; install it first | No | USB cable only after installation |
-| UART0 mask ROM through Pico | The ROM supports it; current Pico/L48 bench wiring is still being finished | ROM mechanism: yes | Pico 2 and the documented five-wire board addition |
+The tested bus clock follows MTIME one-for-one, but the absolute MCU/peripheral
+clock tree is still being characterized. MTIME measured 14.08 MHz in one
+SRAM-loaded setup where older docs had assumed 10 MHz. See
+[MCU clocks](MCU_CLOCKS.md) and [MCU AHB](MCU_AHB_REGISTER_BANK.md).
 
-The AG32 USB connector does not imply a factory USB bootloader. AGaMEMnon's USB
-transport is an application installed in main flash. The flash-independent ROM
-path found so far is UART0 with `BOOT0=1` and `BOOT1=0`. A Raspberry Pi Pico 2
-bridge for it is checked in, but the current five-wire target-side bench setup
-still needs its final hardware qualification run. See the
-[AG32 UART programmer](../pico/ag32_uart_programmer/README.md).
+## Programming paths
 
-Install and verify the SWD/DAP tool with:
+| Transport | Factory board | Works if flash is broken? |
+|---|---|---|
+| SWD/DAP | Yes, with AGaMEMnon OpenOCD | Yes |
+| Flash-resident USB CDC | Install first | No |
+| UART0 mask ROM via Pico | ROM exists in factory silicon; extra wiring needed | Yes in principle; current Pico/L48 target setup still needs its final bench run |
+
+Install the SWD/DAP tool with:
 
 ```sh
 agamemnon install-openocd
 agamemnon doctor --probe-dap
 ```
 
-Read [Programming](PROGRAMMING.md), [USB CDC uploader](USB_CDC_UPLOADER.md), and
-[UART bootloader](UART_BOOTLOADER.md) before changing flash.
+For flash/recovery details, see [Programming](PROGRAMMING.md).
 
-## Clocks and programmable IO
+## Clocks
 
-The current clock table contains 45 accepted fabric `(SYSCLK,HSE)` pairs. On
-the 8 MHz reference board, 43 SYSCLK points from 4 to 248 MHz have been measured
-on silicon. Two additional byte-exact profiles use 12 or 16 MHz HSE inputs and
-have not been exercised on this board. See [MCU clocks](MCU_CLOCKS.md) and the
-clock evidence files for the individual points.
+The current fabric PLL table contains 45 accepted `(SYSCLK,HSE)` pairs. On the
+8 MHz reference board, 43 SYSCLK points from 4 to 248 MHz have been measured.
+Two additional byte-exact profiles use 12 or 16 MHz HSE inputs and have not been
+run on this board.
 
-These are fabric clocks, not RISC-V core frequencies.
+These are **fabric** clocks, not RISC-V CPU frequencies.
 
-Hard-peripheral signals do not automatically appear on arbitrary pins.
-Firmware configures the peripheral controller and the fabric supplies the route
-to package pins. I²C also needs open-drain behavior and external pull-ups. If a
-new fabric image changes those routes, the vendor-default UART/SPI/I²C/LED pin
-mapping may disappear with it.
+The broader clock-distribution problem is not solved yet: one far-region state
+test (`VP-AGM-007`) built and simulated correctly but did not run correctly on
+the chip.
 
-## Documentation map
+## Hard peripherals and pins
 
-Vendor information is fragmented across AGM domains, Chinese-language pages,
-downloadable archives, and several naming conventions. Useful primary sources:
+Firmware configures the hard peripheral controller; the loaded FPGA image
+usually provides the route from that controller to package pins.
+
+So a UART driver does not imply a fixed UART pin map. Loading another fabric
+image can change or remove a previously working peripheral route. I²C also needs
+open-drain IO and external pull-ups.
+
+See [MCU pin routing](MCU_PIN_ROUTING.md) for the current working routes.
+
+## Vendor documentation
+
+Useful primary sources:
 
 - [AGM AG32 product site](https://www.ag32mcu.com/)
 - [AG32 development tools](https://www.ag32mcu.com/dev-tools-category/dev_tools_fpga/)
 - [AG32VF303CCT6 development board](https://www.ag32mcu.com/aum-product/products_board_ag32vf303cct6/)
-- [AG32 MCU Reference Manual, 2025-05-15 revision](https://www.agm-micro.com/upload/userfiles/files/AG32%20MCU%20Reference%20Manual%2820250515%E4%BF%AE%E8%AE%A2%E7%89%88%EF%BC%89.pdf)
-- [AGRV2K data sheet, revision 3.0](https://www.agm-micro.com/upload/userfiles/files/AGRV2K_Rev_3_0.pdf)
-- the separate `AG32-Docs` research workbench, which is not currently public;
-  derived artifacts are cited by repository path when they are not
-  redistributed here
+- [AG32 MCU Reference Manual](https://www.agm-micro.com/upload/userfiles/files/AG32%20MCU%20Reference%20Manual%2820250515%E4%BF%AE%E8%AE%A2%E7%89%88%EF%BC%89.pdf)
+- [AGRV2K data sheet](https://www.agm-micro.com/upload/userfiles/files/AGRV2K_Rev_3_0.pdf)
 
-AGM currently lists AG32 SDK and Supra downloads for Windows and Linux. The
-programmable-logic format and backend are still closed; AGaMEMnon is the open,
-inspectable alternative being built here.
+AGM's information is scattered across several sites/downloads and the FPGA
+backend remains closed. AGaMEMnon is the open replacement being built here.
 
-## Terms used in the detailed docs
+## Terms used in detailed pages
 
-- **Build supported**: the open flow builds it.
+- **Build supported**: the open flow can build it.
 - **Silicon-qualified**: that specific setup was tested on hardware.
-- **Vendor-documented**: AGM documents the feature; AGaMEMnon may or may not
-  support it yet.
-- **Implemented, unqualified**: code exists and has software tests, but the
-  target-side hardware path has not been tested yet.
+- **Vendor-documented**: AGM documents it; AGaMEMnon may not implement it.
+- **Implemented, unqualified**: code exists, but the target-side hardware path
+  has not been tested.
 
-The detailed pages use these distinctions where they matter; this overview
-mostly sticks to "works", "tested", and "unfinished".
+Most reader-facing docs should prefer ordinary “works / tested / unfinished”
+wording unless one of these distinctions matters.
