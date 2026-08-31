@@ -1,106 +1,123 @@
 # Analog/fabric boundary
 
-The 2026-08-24 parity campaign did not add an open analog-macro emission claim.
-The observations below remain a bounded MCU/register and vendor-macro-wrapper
-result. They do not imply that AGaMEMnon bitgen can instantiate the analog IP,
-that external channels are electrically qualified, or that decoded digital
-fabric breadth transfers to analog behavior.
+The analog blocks themselves have been exercised through a vendor `analog_ip`
+wrapper, and the MCU-side register access works. AGaMEMnon does **not** yet emit
+that analog macro itself.
 
-## Silicon-qualified analog register path (L48, 2026-08-14)
+So there are two separate pieces of work here:
 
-The analog hard blocks are memory-mapped in the External-AHB window at
-`0x60000000` (ADC0 `+0x0000`, ADC1 `+0x1000`, ADC2 `+0x2000`, DAC0 `+0x3000`,
-DAC1 `+0x4000`, CMP0 `+0x5000`) and only exist once a fabric image instantiating
-the analog IP wrapper has been configured. On that path the following are
-**silicon-qualified**:
+1. MCU firmware can talk to ADC/DAC/comparator registers through a configured
+   analog wrapper on L48.
+2. The open FPGA flow currently exposes only a few read-only ADC-to-fabric
+   routes.
 
-| Block | Evidence |
+## What has worked on hardware
+
+The analog register window starts at `0x60000000`:
+
+| Block | Offset |
+|---|---:|
+| ADC0 | `+0x0000` |
+| ADC1 | `+0x1000` |
+| ADC2 | `+0x2000` |
+| DAC0 | `+0x3000` |
+| DAC1 | `+0x4000` |
+| CMP0 | `+0x5000` |
+
+These blocks only appeared after loading a fabric image containing the vendor
+analog wrapper.
+
+On the L48 reference board the following worked:
+
+| Block/path | Result |
 |---|---|
-| ADC0, ADC1, ADC2 | 12-bit single-channel one-shot conversion tracking a DAC stimulus |
+| ADC0, ADC1, ADC2 | 12-bit one-shot conversion followed a DAC stimulus |
 | DAC0, DAC1 | 10-bit output verified through ADC readback |
-| CMP0 **unit 1** | output flips at the four internal VREF taps at the predicted codes |
-| DAC0→ADC channel 4, DAC1→ADC channel 5 | internal loopback taps, present on all three ADC instances, no external analog wiring |
-| External-AHB → APB analog register path | reads/writes of every register above from open MCU firmware |
+| CMP0 unit 1 | switched at the four internal VREF settings at the expected DAC codes |
+| DAC0 -> ADC channel 4 | internal loopback worked on all three ADCs |
+| DAC1 -> ADC channel 5 | internal loopback worked |
+| MCU -> analog register window | register reads/writes worked from open firmware |
 
-Stimulus-response, not a constant readback. Sweeping DAC0 across
-`{0,128,256,384,512,640,768,896,1023}` read back, **on one representative run**,
-`0, 512, 1024, 1536, 2054, 2575, 3085, 3598, 4095` on ADC0 channel 4: strictly
-monotonic, ~4.00x linear (the ideal 12-bit-result over 10-bit-code ratio) and
-saturating at full scale. DAC1→channel 5 (on ADC0) and DAC0→ADC1/ADC2 channel 4
-reproduce the behaviour.
+One DAC0 sweep produced ADC0 channel-4 values:
 
-> **That vector is a sample, not a constant.** This is a real analog converter
-> and the low bits move between runs — an independent run of the identical sweep
-> recorded `0, 511, 1024, 1538, 2054, 2573, 3085, 3594, 4095`. The qualified,
-> run-invariant claims are **monotonic**, **~4.00x slope**, and **saturating**;
-> anything asserting the exact codes will be flaky. Quote the vector as evidence
-> of shape, never as an expected value. CMP0 unit 1, with DAC0 on its positive input, flipped at DAC0 codes
-**94 / 188 / 281 / 373** for MSEL = VREF/4, VREF/2, 3·VREF/4, VREF — a clean
-1:2:3:4 progression against the **93 / 186 / 279 / 372** predicted from the
-vendor RTL.
+```text
+DAC:   0  128  256  384  512  640  768  896  1023
+ADC:   0  512 1024 1536 2054 2575 3085 3598 4095
+```
 
-**What this is not.** The MCU side is fully open — AGaMEMnon SDK drivers, SRAM
-staging, FCB configuration, and External-AHB reads — but the fabric image
-instantiates the **vendor `analog_ip` hard-macro wrapper**. AGaMEMnon's own
-bitgen does not emit that macro, so this is a qualification of the analog blocks
-and their register path on the L48 part, *not* a claim that the open flow can
-synthesize or place the analog IP. The route support described below is a
-separate, narrower thing.
+Another run differed by a few ADC counts, as expected from an actual converter.
+The useful result is that the response was monotonic, close to the expected 4:1
+12-bit/10-bit slope, and saturated near full scale. The exact low bits are not
+stable test constants.
 
-**Honest negatives from the same runs:**
+CMP0 unit 1 flipped at DAC codes 94, 188, 281 and 373 for VREF/4, VREF/2,
+3*VREF/4 and VREF. The vendor RTL predicts roughly 93, 186, 279 and 372.
 
-- **CMP0 unit 2 is UNPROVEN, not working.** It is register-readable and its
-  enable bit takes (`CTRL` reads back `0x100`), but its output read high at every
-  DAC0 code — both code 0 and code 1023 — under **both** PSEL2 selects. Its
-  positive-input mux therefore maps to different nets than unit 1's in some
-  undocumented way; the vendor example never exercised it.
-- **External ADC channels 0–3 read full scale** (`0xfff`). The observation is
-  solid; the **cause is not established**, and a full-scale reading means only
-  that no usable analog input was presented — it is not a measurement.
-  > An earlier version of this page said the pads are "not bonded on the L48
-  > package". **That explanation is withdrawn: it is contradicted by our own
-  > data.** The datasheet-derived pin table places `ADC_IN0..IN3` on
-  > `PIN_10..PIN_13`, and all four of those pads are bonded *and*
-  > harness-confirmed working as ordinary digital IO — they are literally the
-  > pads UART0 TX, I2C0 SDA, and SPI0 SCK/CSN were qualified on. The lab record
-  > declines to characterize analog bonding either way.
+The firmware and drivers are:
 
-  Candidate causes, **none confirmed**: the analog input mux is not enabled for
-  those channels; the pad is held in digital mode by the fabric IO ring and
-  never switched to its analog function; the input is unconnected on this board;
-  or a reference/bias is unconfigured. Treat channels 0–3 as **UNPROVEN, not
-  known-absent**.
-- CMP hysteresis and mode bits, ADC/DAC DMA and continuous-scan modes, and
-  multi-entry sequencer runs are all unexercised.
+- `agamemnon/sdk/include/ag32_adc.h`
+- `agamemnon/sdk/include/ag32_dac.h`
+- `agamemnon/sdk/include/ag32_comparator.h`
+- `examples/riscv_mcu/analog_probe.c`
 
-The drivers are `agamemnon/sdk/include/ag32_adc.h`, `ag32_dac.h`, and
-`ag32_comparator.h`; `examples/riscv_mcu/analog_probe.c` runs the sweep and the
-comparator flip scan and reports both verdicts to the SRAM mailbox.
+## Things that did not work or are still unknown
 
-## Read-only ADC route support in the strict open flow
+### Comparator unit 2
 
-The strict open flow currently exposes three read-only analog hard-block
-routes: `AGRV2K_ADC0_DB0`, `AGRV2K_ADC0_DB1`, and `AGRV2K_ADC0_EOC`. Raw
-route-bar `src_sub` values 0, 1, and 12 match the decoded grid-pin ordering and
-establish distinct hard-output identities even though vendor route.tx names all
-three nets by the ADC cell instance. The public graph therefore gives each pin
-a private synthetic first-exit wire before joining the shared fabric topology.
+Unit 2 can be enabled and its registers read back, but its output stayed high
+for the full DAC sweep under both tested PSEL2 choices. Its input mux is not
+understood yet.
 
-The DB0 and DB1 strict smokes each route seven pips and map five configurable
-fields; their vendor oracles each pass 49 selector checks. EOC routes eight
-pips, maps six fields, and passes 59 checks. All have zero unmapped pips and two
-fixed hard-boundary hops. Reproducible hashes are recorded in the three
-`qualification/analog_adc0_*_route_evidence.jsonl` ledgers.
+### External ADC channels 0-3
 
-This is route support only. AGaMEMnon does not configure or start the ADC, does
-not arbitrate MCU/fabric ownership, and makes no ADC timing, electrical, or
-silicon-function claim. DB0 and DB1 both use a symbolically named `InputMUX01`
-in route.tx; their raw `src_sub` identities and private public exits prevent
-that lossy name from merging the hard pins. The checked smoke images must not
-be treated as board qualification images.
+These read `0xfff` in the current setup. An earlier explanation said those pads
+were not bonded on L48; that was wrong. The pin data places `ADC_IN0..IN3` on
+`PIN_10..PIN_13`, and those package pins definitely exist and work as digital
+IO.
 
-The remaining ten ADC0 data lanes and the fabric-to-ADC control corridors remain
-unsupported in the open route graph. Register drivers and board-level analog
-tests exist — see the qualified subset at the top of this
-document — but they run against a vendor-macro fabric image, not an
-open-emitted one.
+Plausible causes include:
+
+- the analog mux was not enabled;
+- the pads remained configured for digital IO;
+- the board does not connect the expected analog signal;
+- some reference/bias setup is missing.
+
+For now the external channels are simply untested as useful analog inputs.
+
+### Other analog modes
+
+Not tested yet:
+
+- comparator hysteresis and other comparator modes;
+- ADC/DAC DMA;
+- continuous scan;
+- longer sequencer programs;
+- broad external-channel behavior.
+
+## Open-flow ADC routes
+
+The strict open routing graph currently exposes three read-only ADC0 outputs:
+
+- `AGRV2K_ADC0_DB0`
+- `AGRV2K_ADC0_DB1`
+- `AGRV2K_ADC0_EOC`
+
+The vendor route data gives DB0, DB1 and EOC distinct raw source indices even
+though its textual names are lossy. AGaMEMnon therefore gives each one a
+private synthetic first-exit wire before joining the normal fabric graph.
+
+The current smoke routes are small:
+
+- DB0: 7 PIPs, 5 configurable fields;
+- DB1: 7 PIPs, 5 configurable fields;
+- EOC: 8 PIPs, 6 configurable fields.
+
+Their route evidence is recorded in the corresponding
+`qualification/analog_adc0_*_route_evidence.jsonl` files.
+
+These routes only move hard-block output signals into the fabric. The open flow
+does not yet instantiate/configure the ADC macro, start conversions, or manage
+ownership between the MCU and fabric.
+
+The other ten ADC0 data lanes and the fabric-to-ADC control paths are still
+missing from the public route graph.
