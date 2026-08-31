@@ -1,8 +1,7 @@
 # Documentation issues
 
 This file tracks contradictions, stale claims and documentation that still needs
-cleanup. It is intentionally a human-maintained list; generated ledgers stay
-generated.
+cleanup. It is intentionally human-maintained; generated ledgers stay generated.
 
 ## Resolved on this branch
 
@@ -15,12 +14,8 @@ The implementation in `agamemnon/engine/claim_policy.py` answers this clearly:
 - physical/electrical surfaces are restricted to L48 in strict mode;
 - `research-unsafe` has its separate rules.
 
-`ARCHITECTURE.md` and `AG32_OVERVIEW.md` now say this. The generated
+`ARCHITECTURE.md`, `AG32_OVERVIEW.md` and `USAGE.md` now say this. The generated
 `FAMILY_COVERAGE_MATRIX.md` was already consistent with the implementation.
-
-**Still stale:** `USAGE.md` contains an older sentence saying strict image
-emission rejects all non-L48 packages. That paragraph should be corrected when
-`USAGE.md` gets its larger cleanup.
 
 ### Absolute “never emits a bad bitstream” promise
 
@@ -48,9 +43,35 @@ Avoid shortening both into “UART recovery qualified.”
 
 ### Clock-profile count
 
-The overview now uses one consistent statement: 45 accepted fabric
+The overview/usage docs now use one consistent statement: 45 accepted fabric
 `(SYSCLK,HSE)` pairs, 43 measured on the reference board with HSE=8, plus two
 byte-exact 12/16 MHz HSE profiles not run on that board.
+
+### MCU clock summary
+
+`MCU_CLOCKS.md` now starts with the current answer instead of making readers
+reconstruct it from several generations of experiments:
+
+- MTIME: 14.08 MHz in one SRAM-loaded L48 setup;
+- UART0 reference: about 14.47 MHz;
+- SPI0 absolute reference: unresolved;
+- External-AHB bus clock: measured 1:1 with MTIME, absolute rate unresolved.
+
+The invalid old ~258 MHz SPI interpretation is kept as a short historical
+correction rather than competing with the current answer.
+
+### `USAGE.md`
+
+The command reference no longer contains pages of exact AHB/BRAM/IO campaign
+archaeology. It keeps the actual commands/options and links detailed hardware
+results to the pages that own them.
+
+### Vendor canvas overview
+
+`FABRIC_DEFAULT_CANVAS.md` no longer has several competing TL;DRs. It now starts
+with what the file is used for today, then keeps the important format numbers,
+reconstruction stages, correction of the old LUT/`0xFF` theory, and FCB CRC
+experiment.
 
 ## Claims that still need checking
 
@@ -76,68 +97,25 @@ composition/congestion-context failures rather than intrinsically dead wires.
 `CONDUCTION_REFRAME_STATUS.md` is deliberately a chronological record, so do
 not rewrite old entries to pretend the project knew the answer earlier.
 
-### MCU clock terminology
-
-`MCU_CLOCKS.md` contains several generations of clock conclusions and is useful
-as an investigation record, but it is hard to tell at a glance which numbers
-are current. In particular:
-
-- MTIME measured 14.08 MHz in one SRAM-loaded setup;
-- UART0's measured reference was around 14.47 MHz;
-- SPI0's absolute reference remains unresolved;
-- the external-AHB bus clock has a measured 1:1 ratio to MTIME, not a settled
-  absolute frequency.
-
-A short “current answer” table at the top would make the long historical detail
-much easier to use.
-
 ## Remaining prose cleanup
-
-### `USAGE.md`
-
-This is now one of the largest reader-facing holdouts. It mixes command
-reference, hardware campaign results, checkpoint archaeology and repeated
-support caveats.
-
-Suggested split:
-
-- keep common CLI syntax/options in `USAGE.md`;
-- move exact retained checkpoint recipes to a dedicated replay/qualification
-  reference;
-- keep hardware evidence in `STATUS.md` / hardware pages;
-- fix the stale non-L48 package statement noted above.
-
-The opening `IMPORTANT` box is also redundant with the status page.
-
-### `MCU_CLOCKS.md`
-
-Keep the measurements and history, but add a short current-state table first and
-move retracted/obsolete interpretations under a historical section.
-
-### `FABRIC_DEFAULT_CANVAS.md`
-
-This is valuable reverse-engineering archaeology, but the top has several
-TL;DRs and repeated “what this does not prove” paragraphs. A cleaner structure
-would be:
-
-1. what `fabric_default.bin` is today;
-2. file/layout facts;
-3. what is decoded;
-4. what is still unknown;
-5. historical corrections.
-
-Do not delete the measurement tables; they are the useful part.
 
 ### `CONDUCTION_REFRAME_STATUS.md`
 
 Keep this mostly as a lab log. It records wrong turns and reversals that should
-not be sanitized away. The main improvement would be a short front-page index:
-current conclusion, important reversals, then the chronological log.
+not be sanitized away. It already has a wind-down summary; future cleanup should
+mainly stop new current-state material from accumulating above the chronological
+log.
 
 ### `HARDWARE_VALIDATION.md`
 
-Likewise, prefer a concise index/current summary at the top rather than deleting
-the detailed bench records. The raw negative results are useful and should stay.
+Prefer a concise index/current summary at the top rather than deleting detailed
+bench records. The raw negative results are useful and should stay.
+
+### Large subsystem research pages
+
+Several AHB/BRAM/IO research pages are intentionally detailed. When they become
+reader-facing references, prefer adding a small “current answer” table and
+moving old hypotheses below it rather than deleting useful archaeology.
 
 ### `CLAIM_POLICY_LEDGER.md`
 
