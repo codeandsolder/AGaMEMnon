@@ -1,64 +1,55 @@
 # Installation and tool bundles
 
-AGaMEMnon's bounded L48 envelope fails closed on known unsupported typed
-surfaces and ambiguous selectors. That is a safety policy, not a promise that
-every accepted composition works: the current campaign includes 13 cleanly
-emitted correctness escapes. Install success and `doctor` capability tiers say
-which tools are present; consult [STATUS.md](STATUS.md) separately for the
-exact silicon-qualified design boundary.
-Tagged releases publish hash-verified Windows and Linux SDK archives containing
-the wheel, pinned RISC-V and FPGA tools, and offline smoke tests; source install
-remains available on Windows, Linux, and macOS. The DAP tool has a separate
-automatic, hash-verified Windows/Linux/macOS installer and release workflow.
+AGaMEMnon can be used at several levels. Python-only inspection needs very
+little; building MCU firmware, building FPGA images, and programming hardware
+need additional tools.
 
-## Current source installation
+## Source install
 
-Python-only inspection, project creation, and offline verification work on
-Windows, Linux, and macOS:
+Python-only inspection, project creation and offline verification work on
+Windows, Linux and macOS:
 
 ```sh
-git clone https://github.com/bbenchoff/AGaMEMnon
+git clone https://github.com/codeandsolder/AGaMEMnon
 cd AGaMEMnon
 python3 -m pip install -e ".[programming]"
 agamemnon --version
 agamemnon doctor --no-hardware
 ```
 
-On Windows, use `python` instead of `python3` if that is the installed launcher.
-All required data is stored as normal Git objects; Git LFS is not required.
+On Windows, use `python` instead of `python3` if that is your installed launcher.
+Git LFS is not required.
 
-Setup is layered:
+## What each capability needs
 
 | Capability | Additional dependency |
 |---|---|
-| Decode, encode, inspect, scaffold, offline verify | None beyond Python and Git |
-| Build MCU firmware | bundled `riscv-none-elf-gcc` or compatible `riscv64-unknown-elf-gcc` |
-| Build FPGA fabric | Yosys plus AGaMEMnon's AGRV2K nextpnr backend |
-| Program through USB CDC | pyserial and an already-installed target uploader |
-| Program through SWD/DAP | CMSIS-DAP plus AGaMEMnon's qualified OpenOCD (`agamemnon install-openocd`) |
-| Recover through UART mask ROM | Pico 2 bridge plus the documented board wiring |
+| Decode, encode, inspect, scaffold, offline verify | Python + Git only |
+| Build MCU firmware | `riscv-none-elf-gcc` or compatible RISC-V GCC |
+| Build FPGA fabric | Yosys + AGaMEMnon's AGRV2K nextpnr backend |
+| Program through USB CDC | pyserial + uploader already installed on target |
+| Program through SWD/DAP | CMSIS-DAP + AGaMEMnon OpenOCD |
+| Recover through mask-ROM UART | Pico 2 bridge + documented board wiring |
 
-The layers are capabilities, not evidence tiers. In particular, `FPGA-build`
-means that synthesis, placement, routing, and bitgen can run on the host. It
-does not mean a new design is vendor-equivalent or qualified on a board.
+`agamemnon doctor` reports these independently, so a missing FPGA toolchain does
+not stop image inspection and a missing probe does not stop builds.
 
-`doctor` checks Python, runtime database integrity, Yosys, the exact nextpnr executable
-and runtime, RISC-V GCC, OpenOCD, pyserial, serial ports, the `cafe:4001` AG32
-USB uploader, the Pico UART bridge, and connected AG32 targets over DAP/USB.
-It reports independent inspection, MCU-build, FPGA-build, DAP, USB, and UART
-capability tiers; a missing optional tool does not make the Python inspection
-tier fail.
-Use `--no-hardware` in CI and `--json` for machine-readable output. When the
-USB uploader already identifies the target, DAP is not opened unless
-`--probe-dap` is supplied, avoiding an unnecessary target reset. UART target
-probing resets into ROM and therefore occurs only with an explicit
-`--uart-port`.
+Useful forms:
 
-## FPGA and MCU toolchains
+```sh
+agamemnon doctor --no-hardware
+agamemnon doctor --json --no-hardware
+agamemnon doctor --probe-dap
+```
 
-Yosys is normally obtained from
+UART target probing resets into ROM, so it only runs when an explicit
+`--uart-port` is supplied.
+
+## FPGA toolchain
+
+Yosys is usually taken from
 [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suite-build/releases).
-Point `AGAMEMNON_OSS` at its root. Build the pinned AGRV2K nextpnr backend:
+Point `AGAMEMNON_OSS` at its root, then build the pinned AGRV2K nextpnr backend:
 
 ```sh
 export AGAMEMNON_OSS=/opt/oss-cad-suite
@@ -66,7 +57,7 @@ export AGAMEMNON_OSS=/opt/oss-cad-suite
 export AGAMEMNON_UARCH_NEXTPNR="$PWD/third_party/nextpnr/build/nextpnr-generic"
 ```
 
-On Windows PowerShell:
+On PowerShell:
 
 ```powershell
 $env:AGAMEMNON_OSS = "C:\tools\oss-cad-suite"
@@ -74,69 +65,68 @@ $env:AGAMEMNON_UARCH_NEXTPNR = "$PWD\third_party\nextpnr\build\nextpnr-generic.e
 $env:AGAMEMNON_UARCH_NEXTPNR_RUNTIME = "C:\path\to\matching\runtime"
 ```
 
-The nextpnr source build requires a native C++ toolchain, CMake, Boost, and
-Eigen. `AGAMEMNON_UARCH_NEXTPNR_RUNTIME` is useful when a Windows executable
-needs runtime DLLs that must not be mixed with OSS CAD Suite's environment.
+Building nextpnr from source needs a C++ toolchain, CMake, Boost and Eigen.
+`AGAMEMNON_UARCH_NEXTPNR_RUNTIME` is mainly useful on Windows when the matching
+runtime DLLs must be kept separate from OSS CAD Suite's environment.
 
-Release bundles pin xPack's cross-platform `riscv-none-elf-gcc`. The MCU
-compiler discovery also accepts `riscv64-unknown-elf-gcc`, `RISCV_PREFIX`, or
-PlatformIO's pinned external `toolchain-agrv` package.
+## MCU compiler
 
-## OpenOCD status
+Release bundles use xPack's `riscv-none-elf-gcc`. Source installs also accept:
 
-Hardware SWD/DAP commands require an OpenOCD executable implementing AGM's
-`target create riscv -dap` extension. Stock upstream and OSS CAD Suite OpenOCD
-builds do not provide it. Install the qualified build:
+- `riscv-none-elf-gcc`;
+- `riscv64-unknown-elf-gcc`;
+- `RISCV_PREFIX`;
+- PlatformIO's `toolchain-agrv` package.
+
+## OpenOCD for SWD/DAP
+
+AG32 SWD support needs AGM's `target create riscv -dap` extension. Stock
+upstream/OSS CAD Suite OpenOCD does not have it.
+
+Install the AGaMEMnon build with:
 
 ```sh
 agamemnon install-openocd
 agamemnon doctor --probe-dap
 ```
 
-The installer verifies the release sidecar hash, extracts to
-`~/.agamemnon/tools/openocd/VERSION`, and records the executable and script
-directory in `current.json`; `probe`, `backup`, `flash`, and `doctor` discover
-it without environment variables. `--base-url` supports a mirror or local
-release directory. Public GitHub releases need no token. Set `GH_TOKEN` or
-`GITHUB_TOKEN` only for an authenticated mirror, private fork, or pre-release
-test asset.
+The installer verifies the archive hash, installs it under
+`~/.agamemnon/tools/openocd/`, and records the active executable/scripts in
+`current.json`. Normal `probe`, `backup`, `flash` and `doctor` commands find it
+automatically.
 
-The exact inputs and build environments are pinned in
-[`tools/openocd/manifest.json`](../tools/openocd/manifest.json). Each release
-contains the platform binary, required Windows DLLs, complete patched source
-and submodules, both patches, GPL text, build recipe, provenance, hashes, and
-an SPDX 2.3 SBOM.
+The exact OpenOCD source/patch inputs are pinned in
+[`tools/openocd/manifest.json`](../tools/openocd/manifest.json). Release
+archives include the executable, required libraries, source, patches, licenses,
+build recipe, hashes and SBOM.
 
-The release workflow produces binaries for Windows x64, Linux x64, and macOS
-on both Apple Silicon (`macos-arm64`) and Intel (`macos-x64`);
-`install-openocd` selects the correct one for the host. macOS archives include
-their `libusb` and HIDAPI dylibs, license files, and exact upstream source
-archives, so end users do not need Homebrew. The macOS arm64 build is
-silicon-qualified on the L48 bench — firmware execution plus a
-restore-verified destructive flash cycle:
-[`docs/evidence/openocd-macos-ag32.json`](evidence/openocd-macos-ag32.json).
-The Intel archive is independently built and parser-tested in CI but does not
-claim a separate Intel-Mac hardware qualification.
+Builds are produced for:
 
-The OS-Q executable is a known-working comparison oracle only. No packaging or
-installer path copies it into an AGaMEMnon release. See [NOTICE.md](../NOTICE.md).
+- Windows x64;
+- Linux x64;
+- macOS arm64;
+- macOS x64.
+
+The macOS arm64 build has been run through firmware execution and a
+backup/program/restore flash cycle on the L48 reference board. The Intel macOS
+archive is built/tested in CI but has not had a separate Intel-Mac hardware run.
 
 ## Driver notes
 
-- CMSIS-DAP uses the operating system HID driver. Do not replace it with a
-  libusb driver on Windows; AGM-capable OpenOCD must be able to open the HID
-  interface.
-- The AG32 USB uploader and Pico bridge use USB CDC ACM. Windows 10/11 include
-  the class driver. Linux normally creates `/dev/ttyACM*`; add the user to the
-  distribution's serial-port group (commonly `dialout`) if access is denied.
-- USB VID:PID `cafe:4001` is the qualified flash-resident uploader. It is not
-  present on untouched factory firmware.
-- The mask-ROM UART path requires the board harness change documented in
+- CMSIS-DAP uses HID. On Windows, do not replace its HID driver with a generic
+  libusb driver.
+- The AG32 uploader and Pico bridge use USB CDC ACM. Windows 10/11 has a class
+  driver; Linux normally exposes `/dev/ttyACM*`.
+- If Linux serial access is denied, add your user to the distro's serial group
+  (commonly `dialout`).
+- VID:PID `cafe:4001` is the flash-resident AGaMEMnon uploader. A factory board
+  does not have it until the uploader is installed.
+- The mask-ROM UART path needs the wiring described in
   [UART_BOOTLOADER.md](UART_BOOTLOADER.md).
 
 ## Development install
 
-Toolchain contributors can still clone and build the pinned backend:
+For engine/toolchain work:
 
 ```sh
 python -m pip install -e ".[programming]"
@@ -144,26 +134,22 @@ python -m pip install -e ".[programming]"
 agamemnon doctor
 ```
 
-All dependency/source pins are centralized in
-[`tools/bundle/manifest.json`](../tools/bundle/manifest.json). Bundle assembly
-is described in [`tools/bundle/README.md`](../tools/bundle/README.md).
+Dependency/source pins live in
+[`tools/bundle/manifest.json`](../tools/bundle/manifest.json). Bundle assembly is
+documented in [`tools/bundle/README.md`](../tools/bundle/README.md).
 
-## Full SDK release bundles
+## SDK bundles
 
-Local Windows and Linux release candidates have completed the full offline
-archive smoke, including CLI diagnostics, routed-fixture verification, MCU
-compilation, strict FPGA+MCU compilation, and bit generation. The Windows
-candidate also passed from a path containing spaces and non-ASCII characters;
-the Linux candidate was assembled and verified from native ext4 staging. They
-remain pre-release until hosted artifacts and SHA-256 sidecars are published
-and independently downloaded/reproduced.
+The intended release bundle contains AGaMEMnon, Yosys/OSS CAD Suite, the
+matching AGRV2K nextpnr runtime and RISC-V GCC. OpenOCD remains a paired
+installable component.
 
-A published Windows or Linux SDK bundle will contain AGaMEMnon, OSS CAD
-Suite/Yosys, the matching AGRV2K nextpnr and runtime libraries, and RISC-V GCC.
-It can consume AGaMEMnon's paired OpenOCD binary/source output; the bundle
-preflight still refuses any unpaired executable.
+Local Windows and Linux bundle candidates have passed the offline smoke tests,
+including CLI diagnostics, routed-fixture verification, MCU compilation and
+FPGA+MCU builds. At the time of this document they are still pre-release until
+hosted archives and SHA-256 sidecars are published and independently checked.
 
-Once a release actually exists, the intended install commands are:
+Once a release is published, the intended installers are:
 
 ```powershell
 ./tools/install.ps1 -Version VERSION
@@ -173,17 +159,13 @@ Once a release actually exists, the intended install commands are:
 sh tools/install.sh VERSION
 ```
 
-The installers download the named archive and verify its published SHA-256,
-extract into a versioned directory, create an isolated Python environment,
-install only from the archive's wheel directory, activate the bundled tools,
-and run `doctor --no-hardware`. They do not contact a Python package index.
-Python 3.8-3.10 bundles therefore include the pinned `tomli` wheel; Python
-3.11+ uses the standard-library TOML parser. Release notes must state whether
-the archive is build-only or also DAP-programming capable.
+They verify the archive hash, install into a versioned directory, create an
+isolated Python environment, use only wheels shipped in the bundle, activate the
+included tools, and run `doctor --no-hardware`.
 
-Windows bundle paths may contain spaces and non-ASCII characters. AGaMEMnon
-works around native nextpnr/Yosys path limitations by staging only the pinned
-nextpnr executable and synthesis support files into a content-addressed ASCII
-cache. The bundled runtime and user project stay in place. If the default
-temporary directory is not writable or is also non-ASCII, set
-`AGAMEMNON_ASCII_TOOL_CACHE` to a writable ASCII-only directory.
+Windows paths with spaces and non-ASCII characters are supported. AGaMEMnon
+stages the few native tools that dislike such paths into an ASCII-only cache.
+If the default cache location is unsuitable, set `AGAMEMNON_ASCII_TOOL_CACHE`.
+
+For what the installed tools can currently build successfully on hardware, see
+[STATUS.md](STATUS.md).
